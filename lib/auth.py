@@ -35,18 +35,24 @@ def _load_config() -> dict:
         return yaml.safe_load(f)
 
 
+_SESSION_KEY = "_authenticator_instance"
+
+
 def _authenticator() -> stauth.Authenticate:
     """
-    Note: ไม่ใช้ @st.cache_resource เพราะ stauth.Authenticate ใช้ widget ภายใน
-    (จะ trigger CachedWidgetWarning). object เบามาก สร้างใหม่ทุก rerun ได้.
+    เก็บ Authenticate instance ใน session_state เพื่อหลีกเลี่ยง 2 ปัญหา:
+    - @st.cache_resource → CachedWidgetWarning (lib ใช้ widget ภายใน)
+    - สร้างใหม่ทุก rerun → CookieManager(key='init') ซ้ำ → DuplicateElementKey
     """
-    cfg = _load_config()
-    return stauth.Authenticate(
-        cfg["credentials"],
-        COOKIE_NAME,
-        COOKIE_KEY,
-        COOKIE_EXPIRY_DAYS,
-    )
+    if _SESSION_KEY not in st.session_state:
+        cfg = _load_config()
+        st.session_state[_SESSION_KEY] = stauth.Authenticate(
+            cfg["credentials"],
+            COOKIE_NAME,
+            COOKIE_KEY,
+            COOKIE_EXPIRY_DAYS,
+        )
+    return st.session_state[_SESSION_KEY]
 
 
 def login_or_stop() -> None:
