@@ -1,6 +1,7 @@
-# --- Secrets / config ---
-secrets/*.json
-secrets/*.key
+# --- Secrets / config (entire folder, except keeper file) ---
+secrets/*
+!secrets/.gitkeep
+!secrets/README.md
 .env
 .streamlit/secrets.toml
 auth_config.yaml
