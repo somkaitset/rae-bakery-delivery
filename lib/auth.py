@@ -35,8 +35,11 @@ def _load_config() -> dict:
         return yaml.safe_load(f)
 
 
-@st.cache_resource
 def _authenticator() -> stauth.Authenticate:
+    """
+    Note: ไม่ใช้ @st.cache_resource เพราะ stauth.Authenticate ใช้ widget ภายใน
+    (จะ trigger CachedWidgetWarning). object เบามาก สร้างใหม่ทุก rerun ได้.
+    """
     cfg = _load_config()
     return stauth.Authenticate(
         cfg["credentials"],
