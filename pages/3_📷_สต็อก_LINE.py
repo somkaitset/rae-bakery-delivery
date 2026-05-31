@@ -4,14 +4,17 @@
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import pandas as pd
 import streamlit as st
 
+from lib import bills, drive, sheets
 from lib.auth import require_auth
 
 require_auth()
@@ -20,25 +23,127 @@ st.title("📷 สต็อกคงเหลือ (จากรูป LINE)")
 
 tab_list, tab_new = st.tabs(["📋 สต็อกล่าสุด", "➕ บันทึกใหม่"])
 
-with tab_list:
-    st.subheader("สต็อกที่บันทึกไว้")
-    st.info("🚧 กำลังพัฒนา — แสดงเป็น gallery (รูป + ลูกค้า + สินค้า + จำนวน)")
 
+# --- List (gallery) ---
+with tab_list:
+    try:
+        ss = sheets.stocks()
+        customers_map = {c.get("รหัสลูกค้า"): c.get("ชื่อลูกค้า") for c in sheets.customers()}
+        products_map = {p.get("รหัสสินค้า"): p.get("ชื่อสินค้า") for p in sheets.products()}
+    except Exception as e:
+        st.error(f"อ่านข้อมูลไม่ได้: {e}")
+        st.stop()
+
+    if not ss:
+        st.info("ยังไม่มีบันทึกสต็อก — ไปที่แท็บ \"บันทึกใหม่\"")
+    else:
+        # sort: วันที่ desc
+        ss_sorted = sorted(
+            ss,
+            key=lambda r: (bills.parse_date(r.get("วันที่")) or date(1900, 1, 1)),
+            reverse=True,
+        )
+
+        cols_per_row = 3
+        for i in range(0, len(ss_sorted), cols_per_row):
+            cols = st.columns(cols_per_row)
+            for j, row in enumerate(ss_sorted[i:i + cols_per_row]):
+                with cols[j]:
+                    img = str(row.get("รูปจาก LINE", "") or "")
+                    if img:
+                        try:
+                            st.image(img, use_container_width=True)
+                        except Exception:
+                            st.caption("(โหลดรูปไม่ได้)")
+                    cust_name = customers_map.get(str(row.get("รหัสลูกค้า", "")), row.get("รหัสลูกค้า", ""))
+                    prod_name = products_map.get(str(row.get("รหัสสินค้า", "")), row.get("รหัสสินค้า", ""))
+                    st.markdown(
+                        f"**{prod_name}** เหลือ **{row.get('จำนวนคงเหลือ', '')}** ชิ้น  \n"
+                        f"📅 {row.get('วันที่', '')} • 🏪 {cust_name}"
+                    )
+                    if row.get("หมายเหตุ"):
+                        st.caption(str(row.get("หมายเหตุ", "")))
+
+
+# --- Add ---
 with tab_new:
     st.subheader("บันทึกสต็อกใหม่")
-    st.info(
-        "🚧 กำลังพัฒนา\n\n"
-        "Flow:\n"
-        "1. ลูกค้าส่งรูปสินค้าเหลือทาง LINE\n"
-        "2. กด `Browse files` หรือใช้กล้องอัปโหลด\n"
-        "3. เลือกลูกค้า, สินค้า, จำนวนคงเหลือ, วันที่\n"
-        "4. กด Save → อัปโหลดรูปไป Drive → บันทึกลง Sheet"
-    )
-    # uploaded = st.camera_input("ถ่ายรูป") หรือ st.file_uploader("อัปโหลดรูป")
+    try:
+        active_customers = sheets.active_customers()
+        active_products = sheets.active_products()
+    except Exception as e:
+        st.error(f"อ่านข้อมูลไม่ได้: {e}")
+        st.stop()
 
-# TODO:
-# - st.file_uploader / st.camera_input
-# - selectbox: ลูกค้า, สินค้า
-# - number_input: จำนวนคงเหลือ
-# - date_input: วันที่ (default = today)
-# - upload via lib.drive.upload_bytes → save URL ลง stock tab
+    if not active_customers or not active_products:
+        st.warning("ไม่มีลูกค้า/สินค้าที่ใช้งาน")
+        st.stop()
+
+    next_id = bills.next_stock_id()
+    st.caption(f"รหัสที่จะใช้: `{next_id}`")
+
+    col_cam, col_file = st.columns(2)
+    with col_cam:
+        cam_pic = st.camera_input("📸 ถ่ายรูป")
+    with col_file:
+        uploaded = st.file_uploader(
+            "หรืออัปโหลดรูปจาก LINE", type=["jpg", "jpeg", "png", "webp"]
+        )
+
+    with st.form("new_stock_form", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            stock_date = st.date_input("วันที่", value=date.today(), format="DD/MM/YYYY")
+        with c2:
+            cust_options = {f"{c['ชื่อลูกค้า']} ({c['รหัสลูกค้า']})": c for c in active_customers}
+            cust_label = st.selectbox("ลูกค้า *", options=list(cust_options.keys()))
+            selected_cust = cust_options[cust_label]
+
+        # filter สินค้าตามลำดับแสดง
+        active_products_sorted = sorted(
+            active_products,
+            key=lambda p: int(bills._to_float(p.get("ลำดับแสดง", 0))),
+        )
+        prod_options = {
+            f"{p['ชื่อสินค้า']} ({p['รหัสสินค้า']}) — กลุ่ม {p.get('กลุ่มราคา', '')}": p
+            for p in active_products_sorted
+        }
+        prod_label = st.selectbox("สินค้า *", options=list(prod_options.keys()))
+        selected_prod = prod_options[prod_label]
+
+        c3, c4 = st.columns([1, 2])
+        with c3:
+            remaining = st.number_input("จำนวนคงเหลือ *", min_value=0, max_value=999, value=0)
+        with c4:
+            note = st.text_input("หมายเหตุ (ทางเลือก)")
+
+        submitted = st.form_submit_button("💾 บันทึก", type="primary", use_container_width=True)
+        if submitted:
+            image_url = ""
+            img_file = cam_pic or uploaded
+            if img_file:
+                try:
+                    with st.spinner("กำลังอัปโหลดรูป..."):
+                        res = drive.upload_bytes(
+                            name=f"stock_{selected_cust['รหัสลูกค้า']}_{selected_prod['รหัสสินค้า']}_{stock_date.isoformat()}.jpg",
+                            content=img_file.getvalue(),
+                            mime_type=img_file.type or "image/jpeg",
+                        )
+                        image_url = res.get("thumbnail_url") or res.get("webViewLink", "")
+                except Exception as e:
+                    st.warning(f"อัปโหลดรูปไม่ได้: {e} — บันทึกโดยไม่มีรูป")
+            try:
+                sid = bills.create_stock(
+                    stock_date=stock_date,
+                    customer_code=selected_cust["รหัสลูกค้า"],
+                    product_code=selected_prod["รหัสสินค้า"],
+                    remaining=int(remaining),
+                    image_url=image_url,
+                    note=note.strip(),
+                )
+                st.success(
+                    f"บันทึก `{sid}` — {selected_prod['ชื่อสินค้า']} เหลือ {remaining} "
+                    f"ที่ {selected_cust['ชื่อลูกค้า']}"
+                )
+            except Exception as e:
+                st.error(f"บันทึกไม่ได้: {e}")

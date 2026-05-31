@@ -46,6 +46,13 @@ def append(tab_key: str, row: list[Any]) -> None:
     _ws(tab_key).append_row(row, value_input_option="USER_ENTERED")
 
 
+def append_many(tab_key: str, rows: list[list[Any]]) -> None:
+    """เพิ่มหลายแถวพร้อมกัน (1 API call แทนหลาย call)."""
+    if not rows:
+        return
+    _ws(tab_key).append_rows(rows, value_input_option="USER_ENTERED")
+
+
 def update_row(tab_key: str, row_number: int, row: list[Any]) -> None:
     """อัปเดตทั้งแถว (row_number = 1-indexed sheet row)."""
     sh = _ws(tab_key)
