@@ -1,0 +1,25 @@
+# --- Streamlit + UI ---
+streamlit>=1.37,<2.0
+streamlit-authenticator>=0.3.2,<0.5
+
+# --- Google Sheets / Drive ---
+gspread>=6.0,<7.0
+google-auth>=2.30,<3.0
+google-auth-oauthlib>=1.2,<2.0
+google-api-python-client>=2.130,<3.0
+
+# --- Data ---
+pandas>=2.2,<3.0
+
+# --- PDF generation (Thai font support) ---
+reportlab>=4.2,<5.0
+
+# --- Image processing ---
+Pillow>=10.3,<12.0
+
+# --- Config / env ---
+python-dotenv>=1.0,<2.0
+PyYAML>=6.0,<7.0
+
+# --- Date / timezone ---
+pytz>=2024.1

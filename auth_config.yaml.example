@@ -1,0 +1,29 @@
+# auth_config.yaml.example
+# -----------------------------------------------
+# Copy เป็น auth_config.yaml (ไฟล์จริง gitignored) แล้วแก้ user/password
+#
+# สร้าง bcrypt hash:
+#   .venv/bin/python scripts/gen_password.py "your-password-here"
+# แล้วก๊อปปี้ผลลัพธ์ (เริ่มต้นด้วย $2b$12$...) มาวางในช่อง password ด้านล่าง
+
+credentials:
+  usernames:
+    admin:
+      name: ผู้ดูแลระบบ
+      email: admin@example.com
+      role: admin
+      password: $2b$12$REPLACE_WITH_HASH_FROM_gen_password.py
+
+    delivery:
+      name: พนักงานส่ง
+      email: delivery@example.com
+      role: staff
+      password: $2b$12$REPLACE_WITH_HASH_FROM_gen_password.py
+
+cookie:
+  name: rae_bakery_auth
+  key: change-me-to-a-random-string-32-chars-long
+  expiry_days: 30
+
+preauthorized:
+  emails: []

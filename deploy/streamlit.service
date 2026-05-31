@@ -1,0 +1,25 @@
+[Unit]
+Description=Rae Bakery Delivery (Streamlit)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=raebakery
+Group=raebakery
+WorkingDirectory=/opt/rae-bakery-delivery
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=/opt/rae-bakery-delivery/.env
+ExecStart=/opt/rae-bakery-delivery/.venv/bin/streamlit run app.py \
+    --server.port 8501 \
+    --server.address 0.0.0.0 \
+    --server.headless true \
+    --browser.gatherUsageStats false \
+    --theme.base light
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

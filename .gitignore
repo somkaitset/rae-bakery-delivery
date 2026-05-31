@@ -1,0 +1,48 @@
+# --- Secrets / config ---
+secrets/*.json
+secrets/*.key
+.env
+.streamlit/secrets.toml
+auth_config.yaml
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Streamlit cache ---
+.streamlit/cache/
+
+# --- IDE / editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# --- OS ---
+Thumbs.db
+
+# --- Logs / runtime ---
+*.log
+logs/
+data/local/
+
+# --- Generated PDF/images (เก็บใน Drive ไม่เก็บใน repo) ---
+generated/
+*.pdf
+output/
