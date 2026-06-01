@@ -26,6 +26,12 @@ SUBFOLDER_ID = os.getenv("SUBFOLDER_ID", "")
 TIMEZONE = os.getenv("TIMEZONE", "Asia/Bangkok")
 APP_TITLE = os.getenv("APP_TITLE", "เรเบเกอรี่ — ระบบส่งสินค้า")
 
+# --- Local image storage ---
+# โฟลเดอร์เก็บรูป (แทน Google Drive — ดู lib/storage.py)
+# บน Proxmox ให้ตั้ง env IMAGES_DIR ชี้ไป volume ถาวรที่ Proxmox backup ครอบไว้
+# เช่น IMAGES_DIR=/mnt/data/rae-bakery/images
+IMAGES_DIR = Path(os.getenv("IMAGES_DIR", str(BASE_DIR / "data" / "images")))
+
 # --- Auth ---
 AUTH_CONFIG_PATH = os.getenv("AUTH_CONFIG_PATH", str(BASE_DIR / "auth_config.yaml"))
 COOKIE_NAME = os.getenv("COOKIE_NAME", "rae_bakery_auth")
