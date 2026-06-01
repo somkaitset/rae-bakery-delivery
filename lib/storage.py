@@ -80,3 +80,14 @@ def image_src(value) -> str | None:
         return s
     path = IMAGES_DIR / Path(s).name
     return str(path) if path.exists() else None
+
+
+def delete_image(value) -> None:
+    """ลบไฟล์รูป local (ข้ามถ้าเป็น URL หรือค่าว่าง; ไม่ error ถ้าไฟล์ไม่มี)."""
+    s = str(value or "").strip()
+    if not s or s.startswith(("http://", "https://", "data:")):
+        return
+    try:
+        (IMAGES_DIR / Path(s).name).unlink(missing_ok=True)
+    except OSError:
+        pass

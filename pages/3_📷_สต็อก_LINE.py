@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 import streamlit as st
 
-from lib import bills, drive, sheets
+from lib import bills, sheets, storage
 from lib.auth import require_auth
 
 require_auth()
@@ -49,7 +49,7 @@ with tab_list:
             cols = st.columns(cols_per_row)
             for j, row in enumerate(ss_sorted[i:i + cols_per_row]):
                 with cols[j]:
-                    img = str(row.get("รูปจาก LINE", "") or "")
+                    img = storage.image_src(row.get("รูปจาก LINE"))
                     if img:
                         try:
                             st.image(img, use_container_width=True)
@@ -82,13 +82,10 @@ with tab_new:
     next_id = bills.next_stock_id()
     st.caption(f"รหัสที่จะใช้: `{next_id}`")
 
-    col_cam, col_file = st.columns(2)
-    with col_cam:
-        cam_pic = st.camera_input("📸 ถ่ายรูป")
-    with col_file:
-        uploaded = st.file_uploader(
-            "หรืออัปโหลดรูปจาก LINE", type=["jpg", "jpeg", "png", "webp"]
-        )
+    uploaded = st.file_uploader(
+        "รูปจาก LINE (บนมือถือเลือก \"ถ่ายรูป\" หรือ \"เลือกจากเครื่อง\" ได้)",
+        type=["jpg", "jpeg", "png", "webp"],
+    )
 
     with st.form("new_stock_form", clear_on_submit=False):
         c1, c2 = st.columns(2)
@@ -120,18 +117,17 @@ with tab_new:
         submitted = st.form_submit_button("💾 บันทึก", type="primary", use_container_width=True)
         if submitted:
             image_url = ""
-            img_file = cam_pic or uploaded
+            img_file = uploaded
             if img_file:
                 try:
-                    with st.spinner("กำลังอัปโหลดรูป..."):
-                        res = drive.upload_bytes(
+                    with st.spinner("กำลังบันทึกรูป..."):
+                        image_url = storage.save_image(
                             name=f"stock_{selected_cust['รหัสลูกค้า']}_{selected_prod['รหัสสินค้า']}_{stock_date.isoformat()}.jpg",
                             content=img_file.getvalue(),
                             mime_type=img_file.type or "image/jpeg",
                         )
-                        image_url = res.get("thumbnail_url") or res.get("webViewLink", "")
                 except Exception as e:
-                    st.warning(f"อัปโหลดรูปไม่ได้: {e} — บันทึกโดยไม่มีรูป")
+                    st.warning(f"บันทึกรูปไม่ได้: {e} — บันทึกโดยไม่มีรูป")
             try:
                 sid = bills.create_stock(
                     stock_date=stock_date,

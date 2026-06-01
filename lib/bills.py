@@ -273,6 +273,12 @@ def update_product(row_number: int, code: str, name: str, price_group: str,
     sheets.clear_caches()
 
 
+def delete_product(row_number: int) -> None:
+    """ลบสินค้า 1 แถวออกจากชีต (row_number = 1-indexed sheet row)."""
+    sheets.delete_row("product", row_number)
+    sheets.clear_caches()
+
+
 def create_stock(stock_date: date, customer_code: str, product_code: str,
                  remaining: int, image_url: str = "", note: str = "") -> str:
     sid = next_stock_id()

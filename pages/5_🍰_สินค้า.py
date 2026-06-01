@@ -1,5 +1,10 @@
 """
-หน้าจัดการสินค้า — gallery + add (with image) + edit
+หน้าจัดการสินค้า — แกลเลอรี่ (คลิกแก้ไข) + ตาราง + เพิ่ม + แก้ไข/ลบ
+
+โครงสร้าง: ใช้ session_state เป็น router แทน st.tabs เพราะ tabs สลับเองไม่ได้
+- ปกติ: เลือกมุมมองด้วย radio (แกลเลอรี่ / ตาราง / เพิ่ม)
+- คลิก "แก้ไข" ใต้รูปในแกลเลอรี่ → เข้าโหมดแก้ไขสินค้านั้น
+- บันทึก/ลบ/ยกเลิก → กลับมาที่แกลเลอรี่ (อ่านข้อมูลใหม่ → รูปอัปเดตทันที)
 """
 from __future__ import annotations
 
@@ -13,7 +18,7 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 import streamlit as st
 
-from lib import bills, drive, sheets
+from lib import bills, sheets, storage
 from lib.auth import require_auth
 
 require_auth()
@@ -22,75 +27,101 @@ st.title("🍰 สินค้า")
 
 PRICE_GROUPS = ["10", "12", "15", "20", "25", "30", "35"]
 
-tab_gal, tab_table, tab_new, tab_edit = st.tabs(
-    ["🖼️ Gallery", "📋 ตาราง", "➕ เพิ่มสินค้า", "✏️ แก้ไข"]
-)
+st.session_state.setdefault("prod_edit_code", None)
 
+
+# --- helpers ---
 
 def _normalize_active(v):
     return bool(v) if isinstance(v, bool) else str(v).upper() in ("TRUE", "1")
 
 
-# --- Gallery ---
-with tab_gal:
+def _sort_key(p):
+    """เรียงตามกลุ่มราคา (ตัวเลข) แล้วตามด้วยรหัสสินค้า."""
+    return (int(bills._to_float(p.get("กลุ่มราคา", 0))), str(p.get("รหัสสินค้า", "")))
+
+
+def _go_edit(code: str) -> None:
+    st.session_state.prod_edit_code = code
+
+
+def _go_gallery() -> None:
+    st.session_state.prod_edit_code = None
+    st.session_state.prod_nav = "🖼️ แกลเลอรี่"
+
+
+# ============ Views ============
+
+def render_gallery() -> None:
+    flash = st.session_state.pop("prod_flash", None)
+    if flash:
+        st.success(flash)
+
     try:
         ps = sheets.products()
     except Exception as e:
         st.error(f"อ่านข้อมูลไม่ได้: {e}")
-        st.stop()
+        return
 
     if not ps:
-        st.info("ยังไม่มีสินค้า")
-    else:
-        # filter active + sort by ลำดับแสดง
-        active_only = st.toggle("แสดงเฉพาะที่ใช้งาน", value=True, key="gal_active")
-        ps_filtered = [p for p in ps if (not active_only) or _normalize_active(p.get("ใช้งาน"))]
-        ps_filtered.sort(key=lambda p: int(bills._to_float(p.get("ลำดับแสดง", 0))))
+        st.info("ยังไม่มีสินค้า — ไปที่ ➕ เพิ่มสินค้า")
+        return
 
-        cols_per_row = 4
-        for i in range(0, len(ps_filtered), cols_per_row):
-            cols = st.columns(cols_per_row)
-            for j, p in enumerate(ps_filtered[i:i + cols_per_row]):
-                with cols[j]:
-                    img = str(p.get("รูปสินค้า", "") or "")
-                    if img:
-                        try:
-                            st.image(img, use_container_width=True)
-                        except Exception:
-                            st.caption("(โหลดรูปไม่ได้)")
-                    else:
-                        st.markdown(
-                            "<div style='height:120px;background:#eee;border-radius:8px;"
-                            "display:flex;align-items:center;justify-content:center;color:#999'>"
-                            "ไม่มีรูป</div>",
-                            unsafe_allow_html=True,
-                        )
+    active_only = st.toggle("แสดงเฉพาะที่ใช้งาน", value=True, key="gal_active")
+    ps = [p for p in ps if (not active_only) or _normalize_active(p.get("ใช้งาน"))]
+    ps.sort(key=_sort_key)
+    st.caption("เรียงตามกลุ่มราคา → รหัสสินค้า • คลิก **✏️ แก้ไข** ใต้รูปเพื่อแก้สินค้านั้น")
+
+    cols_per_row = 4
+    for i in range(0, len(ps), cols_per_row):
+        cols = st.columns(cols_per_row)
+        for j, p in enumerate(ps[i:i + cols_per_row]):
+            code = str(p.get("รหัสสินค้า", ""))
+            with cols[j]:
+                img = storage.image_src(p.get("รูปสินค้า"))
+                if img:
+                    try:
+                        st.image(img, use_container_width=True)
+                    except Exception:
+                        st.caption("(โหลดรูปไม่ได้)")
+                else:
                     st.markdown(
-                        f"**{p.get('ชื่อสินค้า', '')}**  \n"
-                        f"`{p.get('รหัสสินค้า', '')}` • กลุ่ม {p.get('กลุ่มราคา', '')}"
+                        "<div style='height:120px;background:#eee;border-radius:8px;"
+                        "display:flex;align-items:center;justify-content:center;color:#999'>"
+                        "ไม่มีรูป</div>",
+                        unsafe_allow_html=True,
                     )
+                st.button(
+                    "✏️ แก้ไข",
+                    key=f"edit_btn_{code}",
+                    use_container_width=True,
+                    on_click=_go_edit,
+                    args=(code,),
+                )
+                st.markdown(
+                    f"**{p.get('ชื่อสินค้า', '')}**  \n"
+                    f"`{code}` • กลุ่ม {p.get('กลุ่มราคา', '')}"
+                )
 
 
-# --- Table ---
-with tab_table:
+def render_table() -> None:
     try:
         ps = sheets.products()
     except Exception as e:
         st.error(f"อ่านข้อมูลไม่ได้: {e}")
-        st.stop()
+        return
     if not ps:
         st.info("ยังไม่มีสินค้า")
-    else:
-        df = pd.DataFrame(ps)
-        if "ใช้งาน" in df.columns:
-            df["ใช้งาน"] = df["ใช้งาน"].apply(_normalize_active)
-        df = df.sort_values(["ใช้งาน", "ลำดับแสดง"], ascending=[False, True]).reset_index(drop=True)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        st.caption(f"รวม **{len(ps)}** รายการ ({int(df['ใช้งาน'].sum())} ใช้งาน)")
+        return
+    df = pd.DataFrame(sorted(ps, key=_sort_key))
+    if "ใช้งาน" in df.columns:
+        df["ใช้งาน"] = df["ใช้งาน"].apply(_normalize_active)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    active_n = sum(_normalize_active(p.get("ใช้งาน")) for p in ps)
+    st.caption(f"รวม **{len(ps)}** รายการ ({active_n} ใช้งาน)")
 
 
-# --- Add ---
-with tab_new:
+def render_add() -> None:
     st.subheader("เพิ่มสินค้าใหม่")
     pg_pick = st.selectbox("กลุ่มราคา *", options=PRICE_GROUPS, key="new_pg")
     next_code = bills.next_product_code(pg_pick)
@@ -104,123 +135,144 @@ with tab_new:
         with c2:
             active = st.checkbox("ใช้งาน", value=True)
 
-        st.markdown("**รูปสินค้า**")
-        col_cam, col_file = st.columns(2)
-        with col_cam:
-            cam_pic = st.camera_input("📸 ถ่ายรูป")
-        with col_file:
-            uploaded = st.file_uploader(
-                "หรืออัปโหลดจากไฟล์", type=["jpg", "jpeg", "png", "webp"]
-            )
+        uploaded = st.file_uploader(
+            "รูปสินค้า (บนมือถือเลือก \"ถ่ายรูป\" หรือ \"เลือกจากเครื่อง\" ได้)",
+            type=["jpg", "jpeg", "png", "webp"],
+        )
 
         submitted = st.form_submit_button("💾 บันทึก", type="primary", use_container_width=True)
         if submitted:
             if not name.strip():
                 st.error("กรอกชื่อสินค้า")
-            else:
-                image_url = ""
-                img_file = cam_pic or uploaded
-                if img_file:
-                    try:
-                        with st.spinner("กำลังอัปโหลดรูป..."):
-                            res = drive.upload_bytes(
-                                name=f"product_{name.strip()}_{next_code}.jpg",
-                                content=img_file.getvalue(),
-                                mime_type=img_file.type or "image/jpeg",
-                            )
-                            image_url = res.get("thumbnail_url") or res.get("webViewLink", "")
-                    except Exception as e:
-                        st.warning(f"อัปโหลดรูปไม่ได้: {e} — บันทึกข้อมูลโดยไม่มีรูป")
+                return
+            image_url = ""
+            if uploaded:
                 try:
-                    code = bills.create_product(
-                        name=name.strip(),
-                        price_group=pg_pick,
-                        image_url=image_url,
-                        display_order=int(display_order),
-                        active=active,
-                    )
-                    st.success(f"เพิ่ม `{code}` ({name}) เรียบร้อย")
-                    if image_url:
-                        st.image(image_url, width=150)
+                    with st.spinner("กำลังบันทึกรูป..."):
+                        image_url = storage.save_image(
+                            name=f"product_{name.strip()}_{next_code}.jpg",
+                            content=uploaded.getvalue(),
+                            mime_type=uploaded.type or "image/jpeg",
+                        )
                 except Exception as e:
-                    st.error(f"บันทึกไม่ได้: {e}")
+                    st.warning(f"บันทึกรูปไม่ได้: {e} — บันทึกข้อมูลโดยไม่มีรูป")
+            try:
+                code = bills.create_product(
+                    name=name.strip(),
+                    price_group=pg_pick,
+                    image_url=image_url,
+                    display_order=int(display_order),
+                    active=active,
+                )
+                st.success(f"เพิ่ม `{code}` ({name}) เรียบร้อย")
+                preview = storage.image_src(image_url)
+                if preview:
+                    st.image(preview, width=150)
+            except Exception as e:
+                st.error(f"บันทึกไม่ได้: {e}")
 
 
-# --- Edit ---
-with tab_edit:
-    st.subheader("แก้ไขสินค้า")
+def render_edit(code: str) -> None:
+    st.button("⬅️ กลับแกลเลอรี่", on_click=_go_gallery)
+
     try:
         ps = sheets.products()
     except Exception as e:
         st.error(f"อ่านข้อมูลไม่ได้: {e}")
-        st.stop()
-    if not ps:
-        st.info("ยังไม่มีสินค้า")
-    else:
-        labels = {
-            f"{p['รหัสสินค้า']} — {p['ชื่อสินค้า']} (กลุ่ม {p.get('กลุ่มราคา', '')})": (i, p)
-            for i, p in enumerate(ps)
-        }
-        choice = st.selectbox("เลือกสินค้า", options=list(labels.keys()), key="edit_prod")
-        idx, target = labels[choice]
-        row_number = idx + 2
+        return
 
-        current_img = str(target.get("รูปสินค้า", "") or "")
-        if current_img:
-            st.image(current_img, width=150, caption="รูปปัจจุบัน")
+    target = next((p for p in ps if str(p.get("รหัสสินค้า", "")) == code), None)
+    if target is None:
+        st.error(f"ไม่พบสินค้า `{code}` (อาจถูกลบไปแล้ว) — กดกลับแกลเลอรี่")
+        return
 
-        with st.form("edit_product_form"):
-            code = st.text_input("รหัส", value=target.get("รหัสสินค้า", ""), disabled=True)
-            name = st.text_input("ชื่อสินค้า *", value=str(target.get("ชื่อสินค้า", "")))
-            current_pg = str(target.get("กลุ่มราคา", "10"))
-            price_group = st.selectbox(
-                "กลุ่มราคา *",
-                options=PRICE_GROUPS,
-                index=PRICE_GROUPS.index(current_pg) if current_pg in PRICE_GROUPS else 0,
-            )
-            display_order = st.number_input(
-                "ลำดับแสดง",
-                min_value=0, max_value=999,
-                value=int(bills._to_float(target.get("ลำดับแสดง", 0))),
-            )
-            active = st.checkbox("ใช้งาน", value=_normalize_active(target.get("ใช้งาน")))
+    row_number = sheets.find_row_by_key("product", code)
+    if not row_number:
+        st.error(f"หาแถวของ `{code}` ใน Sheet ไม่เจอ")
+        return
 
-            st.markdown("**เปลี่ยนรูป (ทางเลือก)**")
-            col_cam, col_file = st.columns(2)
-            with col_cam:
-                cam_pic = st.camera_input("📸 ถ่ายรูปใหม่", key="edit_cam")
-            with col_file:
-                uploaded = st.file_uploader(
-                    "หรืออัปโหลดไฟล์ใหม่",
-                    type=["jpg", "jpeg", "png", "webp"],
-                    key="edit_file",
-                )
-            keep_current = st.checkbox("เก็บรูปเดิม", value=True)
+    st.subheader(f"แก้ไขสินค้า `{code}`")
 
-            submitted = st.form_submit_button("💾 บันทึก", type="primary", use_container_width=True)
-            if submitted:
-                if not name.strip():
-                    st.error("กรอกชื่อสินค้า")
-                else:
-                    new_img_url = current_img if keep_current else ""
-                    img_file = cam_pic or uploaded
-                    if img_file:
-                        try:
-                            with st.spinner("กำลังอัปโหลดรูปใหม่..."):
-                                res = drive.upload_bytes(
-                                    name=f"product_{name.strip()}_{code}.jpg",
-                                    content=img_file.getvalue(),
-                                    mime_type=img_file.type or "image/jpeg",
-                                )
-                                new_img_url = res.get("thumbnail_url") or res.get("webViewLink", "")
-                        except Exception as e:
-                            st.warning(f"อัปโหลดไม่ได้: {e}")
-                    try:
-                        bills.update_product(
-                            row_number, code, name.strip(), price_group,
-                            new_img_url, int(display_order), active,
+    current_img = str(target.get("รูปสินค้า", "") or "")
+    current_src = storage.image_src(current_img)
+    if current_src:
+        st.image(current_src, width=150, caption="รูปปัจจุบัน")
+
+    with st.form("edit_product_form"):
+        st.text_input("รหัส", value=code, disabled=True)
+        name = st.text_input("ชื่อสินค้า *", value=str(target.get("ชื่อสินค้า", "")))
+        current_pg = str(target.get("กลุ่มราคา", "10"))
+        price_group = st.selectbox(
+            "กลุ่มราคา *",
+            options=PRICE_GROUPS,
+            index=PRICE_GROUPS.index(current_pg) if current_pg in PRICE_GROUPS else 0,
+        )
+        display_order = st.number_input(
+            "ลำดับแสดง", min_value=0, max_value=999,
+            value=int(bills._to_float(target.get("ลำดับแสดง", 0))),
+        )
+        active = st.checkbox("ใช้งาน", value=_normalize_active(target.get("ใช้งาน")))
+
+        uploaded = st.file_uploader(
+            "เปลี่ยนรูป (เว้นว่าง = ใช้รูปเดิม)",
+            type=["jpg", "jpeg", "png", "webp"],
+        )
+
+        submitted = st.form_submit_button("💾 บันทึก", type="primary", use_container_width=True)
+        if submitted:
+            if not name.strip():
+                st.error("กรอกชื่อสินค้า")
+                return
+            new_img = current_img
+            if uploaded:
+                try:
+                    with st.spinner("กำลังบันทึกรูปใหม่..."):
+                        new_img = storage.save_image(
+                            name=f"product_{name.strip()}_{code}.jpg",
+                            content=uploaded.getvalue(),
+                            mime_type=uploaded.type or "image/jpeg",
                         )
-                        st.success(f"อัปเดต `{code}` เรียบร้อย")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"อัปเดตไม่ได้: {e}")
+                except Exception as e:
+                    st.warning(f"บันทึกรูปไม่ได้: {e}")
+            try:
+                bills.update_product(
+                    row_number, code, name.strip(), price_group,
+                    new_img, int(display_order), active,
+                )
+                st.session_state.prod_flash = f"อัปเดต `{code}` เรียบร้อย"
+                _go_gallery()
+                st.rerun()
+            except Exception as e:
+                st.error(f"อัปเดตไม่ได้: {e}")
+
+    with st.expander("🗑️ ลบสินค้านี้"):
+        st.warning("การลบไม่สามารถย้อนกลับได้ (รูปในเครื่องจะถูกลบด้วย)")
+        if st.button(f"ยืนยันลบ `{code}`", type="primary", key="del_prod"):
+            try:
+                bills.delete_product(row_number)
+                storage.delete_image(current_img)
+                st.session_state.prod_flash = f"ลบ `{code}` แล้ว"
+                _go_gallery()
+                st.rerun()
+            except Exception as e:
+                st.error(f"ลบไม่ได้: {e}")
+
+
+# ============ Router ============
+
+if st.session_state.prod_edit_code:
+    render_edit(st.session_state.prod_edit_code)
+else:
+    view = st.radio(
+        "เมนู",
+        ["🖼️ แกลเลอรี่", "📋 ตาราง", "➕ เพิ่มสินค้า"],
+        horizontal=True,
+        key="prod_nav",
+        label_visibility="collapsed",
+    )
+    if view == "🖼️ แกลเลอรี่":
+        render_gallery()
+    elif view == "📋 ตาราง":
+        render_table()
+    else:
+        render_add()
