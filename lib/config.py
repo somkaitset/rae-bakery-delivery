@@ -31,6 +31,14 @@ APP_TITLE = os.getenv("APP_TITLE", "เรเบเกอรี่ — ระบ
 # บน Proxmox ให้ตั้ง env IMAGES_DIR ชี้ไป volume ถาวรที่ Proxmox backup ครอบไว้
 # เช่น IMAGES_DIR=/mnt/data/rae-bakery/images
 IMAGES_DIR = Path(os.getenv("IMAGES_DIR", str(BASE_DIR / "data" / "images")))
+# ย่อรูปก่อนเก็บ: ด้านยาวสุดไม่เกิน N px + คุณภาพ JPEG (ลดขนาดไฟล์จากมือถือ 3-5MB → ~100-300KB)
+IMAGE_MAX_SIDE = int(os.getenv("IMAGE_MAX_SIDE", "1600"))
+IMAGE_JPEG_QUALITY = int(os.getenv("IMAGE_JPEG_QUALITY", "85"))
+
+# --- Data cache ---
+# อายุ cache ข้อมูลที่อ่านจาก Google Sheets (วินาที) — ลดการยิง API ทุก rerun
+# จะถูกเคลียร์ทันทีเมื่อมีการเขียน (เพิ่ม/แก้/ลบ) อยู่แล้ว
+SHEETS_CACHE_TTL = int(os.getenv("SHEETS_CACHE_TTL", "60"))
 
 # --- Auth ---
 AUTH_CONFIG_PATH = os.getenv("AUTH_CONFIG_PATH", str(BASE_DIR / "auth_config.yaml"))

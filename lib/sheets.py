@@ -7,9 +7,10 @@ from functools import lru_cache
 from typing import Any
 
 import gspread
+import streamlit as st
 from google.oauth2.service_account import Credentials
 
-from lib.config import GOOGLE_SERVICE_ACCOUNT_PATH, SHEET_ID, TABS
+from lib.config import GOOGLE_SERVICE_ACCOUNT_PATH, SHEET_ID, SHEETS_CACHE_TTL, TABS
 
 
 SCOPES = [
@@ -36,14 +37,25 @@ def _ws(tab_key: str) -> gspread.Worksheet:
     return _spreadsheet().worksheet(TABS[tab_key])
 
 
-def all_records(tab_key: str) -> list[dict[str, Any]]:
-    """อ่านทุกแถวเป็น list of dicts (header → value)."""
+@st.cache_data(ttl=SHEETS_CACHE_TTL, show_spinner=False)
+def _records_cached(tab_key: str) -> list[dict[str, Any]]:
     return _ws(tab_key).get_all_records()
+
+
+def all_records(tab_key: str) -> list[dict[str, Any]]:
+    """อ่านทุกแถวเป็น list of dicts (header → value) — cache ตาม SHEETS_CACHE_TTL."""
+    return _records_cached(tab_key)
+
+
+def _invalidate() -> None:
+    """ล้าง data cache (เรียกหลังเขียนทุกครั้ง เพื่อให้รอบหน้าอ่านค่าใหม่)."""
+    _records_cached.clear()
 
 
 def append(tab_key: str, row: list[Any]) -> None:
     """เพิ่มแถวต่อท้ายตาราง."""
     _ws(tab_key).append_row(row, value_input_option="USER_ENTERED")
+    _invalidate()
 
 
 def append_many(tab_key: str, rows: list[list[Any]]) -> None:
@@ -51,6 +63,7 @@ def append_many(tab_key: str, rows: list[list[Any]]) -> None:
     if not rows:
         return
     _ws(tab_key).append_rows(rows, value_input_option="USER_ENTERED")
+    _invalidate()
 
 
 def update_row(tab_key: str, row_number: int, row: list[Any]) -> None:
@@ -62,6 +75,7 @@ def update_row(tab_key: str, row_number: int, row: list[Any]) -> None:
         [row],
         value_input_option="USER_ENTERED",
     )
+    _invalidate()
 
 
 def find_row_by_key(tab_key: str, key_value: str, key_col: int = 1) -> int | None:
@@ -76,12 +90,14 @@ def find_row_by_key(tab_key: str, key_value: str, key_col: int = 1) -> int | Non
 
 def delete_row(tab_key: str, row_number: int) -> None:
     _ws(tab_key).delete_rows(row_number)
+    _invalidate()
 
 
 def clear_caches() -> None:
     """ใช้หลังเขียนข้อมูลเสร็จ เพื่อให้รอบหน้าอ่านข้อมูลใหม่."""
     _client.cache_clear()
     _spreadsheet.cache_clear()
+    _invalidate()
 
 
 # --- Convenience wrappers (เรียกใช้ใน pages) ---
