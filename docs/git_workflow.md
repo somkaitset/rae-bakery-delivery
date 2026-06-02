@@ -1,18 +1,19 @@
 # Git Workflow
 
 ## Branching strategy
-- `main` — production-ready code; ห้าม commit ตรง
-- `feature/<short-name>` — งานใหม่ทุกอย่าง (เพิ่ม feature, fix bug, refactor)
-- `hotfix/<short-name>` — แก้ด่วน production (รวมเข้า main แล้วผมจะ tag)
+- `main` — production-ready code; ห้าม commit ตรง (release merges + hotfix เท่านั้น)
+- `develop` — integration branch; all `feature/*` branches merge here first, then `develop` is promoted to `main` for a release
+- `feature/<short-name>` — งานใหม่ทุกอย่าง (เพิ่ม feature, fix bug, refactor); branch from `develop`, merge back into `develop`
+- `hotfix/<short-name>` — แก้ด่วน production (branch from `main`, merge เข้าทั้ง `main` และ `develop`; แล้วผมจะ tag)
 
 ## ขั้นตอนทำ feature ใหม่
 
 ```bash
-# 1. update main ก่อน
-git checkout main
-git pull origin main
+# 1. update develop ก่อน
+git checkout develop
+git pull origin develop
 
-# 2. สร้าง branch ใหม่
+# 2. สร้าง branch ใหม่ (แตกจาก develop)
 git checkout -b feature/bill-grid-form
 
 # 3. เขียน code → commit ทีละหน่วยที่ทำงานได้
@@ -22,12 +23,28 @@ git commit -m "feat: add bill grid form with all products"
 # 4. push ขึ้น remote
 git push -u origin feature/bill-grid-form
 
-# 5. (ถ้ามี remote เป็น GitHub/GitLab) เปิด Pull Request → review → merge
-# (ถ้าใช้ local อย่างเดียว) merge ตรง:
-git checkout main
+# 5. (ถ้ามี remote เป็น GitHub/GitLab) เปิด Pull Request เข้า develop → review → merge
+# (ถ้าใช้ local อย่างเดียว) merge เข้า develop:
+git checkout develop
 git merge --no-ff feature/bill-grid-form
-git push origin main
+git push origin develop
 git branch -d feature/bill-grid-form
+```
+
+## Releasing (develop → main)
+
+`main` moves only through a `develop` promotion (a release) or a `hotfix/*` merge — never a direct commit. When `develop` is stable and ready to ship:
+
+```bash
+git checkout main
+git pull origin main
+git merge --no-ff develop              # bring the release into main
+git tag -a vX.Y.Z -m "release: <summary>"
+git push origin main --follow-tags
+
+git checkout develop                   # sync develop back with main
+git merge --no-ff main
+git push origin develop
 ```
 
 ## Commit message convention
