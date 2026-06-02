@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Streamlit app for a Thai bakery ("เรเบเกอรี่") that records and prints delivery bills for products sent to schools. The UI, page titles, and all data column names are in **Thai** — preserve Thai strings exactly (column-name keys like `"รหัสลูกค้า"` are dictionary lookups against Thai-keyed dicts returned by `lib/sheets.py`; a typo silently returns empty).
+A Streamlit app for a Thai bakery ("เรเบเกอรี่") that records and prints delivery bills for products sent to schools. The UI and page titles are in **Thai** — preserve those strings exactly. As of Phase 2, data is keyed internally by **English** column names (`row.get("customer_code")`, not `row.get("รหัสลูกค้า")`); Thai survives only as UI display labels. Key lookups are still `dict.get`, so a wrong key silently returns empty — but the keys are now stable English (see `lib/schema.py` `COLUMNS`).
 
 ## Commands
 
@@ -35,7 +35,7 @@ Layered design:
 - **`lib/sheets.py`** — same public surface (`customers()`, `products()`, `bills()`, `bill_items()`, `bill_lines()`, `stocks()`, `wholesale_prices()`, `active_customers()`, `active_products()`, `append()`, `update_row()`, `delete_row()`, `find_row_by_key()`), now backed by SQLite via `lib/db.py`. `_invalidate()` and `clear_caches()` call `st.cache_data.clear()` globally (also clears page-level caches). No gspread import.
 - **`lib/bills.py`** — domain logic on top of `sheets`: ID generators (`next_bill_id` → `D0001`, `next_product_code` maps price-group→`P1xx/P2xx/...`), Thai date parse/format (`d/m/yyyy`, no leading zero), price lookups, totals, `suggest_qty` (7-day sales avg minus latest stock), and the create/update/delete operations. **Pages should call `bills.*` for anything beyond a plain read.** Read-once-pass-down: functions accept optional pre-loaded row lists to avoid re-fetching inside loops.
 - **`lib/storage.py`**, **`lib/pdf.py`**, **`lib/auth.py`** — image storage, PDF rendering, authentication (below).
-- **`lib/models.py`** — dataclasses documenting each tab's shape. They are *reference only*; the live code passes raw `dict`s keyed by Thai headers, not these instances.
+- **`lib/models.py`** — dataclasses documenting each tab's shape. They are *reference only*; the live code passes raw `dict`s keyed by **English** column names (per Phase 2), not these instances.
 - **`pages/N_emoji_name.py`** — Streamlit auto-multipage. Each page re-inserts repo root on `sys.path` (the `ROOT = Path(...).parent.parent; sys.path.insert` block) so `from lib import ...` works, then calls `require_auth()` first thing.
 
 ### Things that will bite you
