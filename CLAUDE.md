@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Streamlit app for a Thai bakery ("เรเบเกอรี่") that records and prints delivery bills for products sent to schools. The UI, page titles, and all data column names are in **Thai** — preserve Thai strings exactly (column-name keys like `"รหัสลูกค้า"` are dictionary lookups against the Google Sheet headers; a typo silently returns empty).
+A Streamlit app for a Thai bakery ("เรเบเกอรี่") that records and prints delivery bills for products sent to schools. The UI, page titles, and all data column names are in **Thai** — preserve Thai strings exactly (column-name keys like `"รหัสลูกค้า"` are dictionary lookups against Thai-keyed dicts returned by `lib/sheets.py`; a typo silently returns empty).
 
 ## Commands
 
@@ -20,15 +20,19 @@ deploy/install.sh     # first-time provision (apt, venv, Tailscale, systemd)
 deploy/update.sh      # git pull --ff-only + pip upgrade + systemctl restart rae-bakery
 ```
 
-There is **no test suite or linter configured** — `tests/` is an empty package and there is no CI. `.pytest_cache/`/`.ruff_cache/`/`.mypy_cache/` appear in `.gitignore` as conventions, but none are wired up. Don't claim tests pass; there are none to run.
+There is a `pytest` suite under `tests/` — run it with `.venv/bin/pytest -q`. No linter or CI is configured. `.pytest_cache/`/`.ruff_cache/`/`.mypy_cache/` appear in `.gitignore` as conventions, but only `pytest` is wired up. Pages are smoke-tested manually (their `require_auth()` + `sys.path` side effects make full import-smoke in pytest brittle).
 
 ## Architecture
 
-**The Google Sheet IS the database.** There is no SQL/ORM. `lib/sheets.py` wraps `gspread` and every "table" is a worksheet tab, mapped from an English key to its Thai name in `lib.config.TABS` (e.g. `"customer"` → `"ลูกค้า"`). Always go through `_ws(tab_key)` / the convenience wrappers (`sheets.customers()`, `sheets.products()`, etc.) rather than hard-coding tab names.
+**SQLite is the single source of truth (Phase 1).** `lib/db.py` + `lib/schema.py` define the schema; `lib/sheets.py` is backed by SQLite (gspread removed from it) but keeps the **same `list[dict]`-keyed-by-Thai-header interface** it always had — so `lib/bills.py` and all pages are unchanged. The Google Sheet is retired/frozen as a read-only backup; the one-time import is done via `scripts/migrate_sheets_to_sqlite.py`. Thai column-name keys are still dict lookups (same as before) — a typo still silently returns empty.
+
+**Phase 2 (English column/key rename across pages) is NOT yet done.** Keys remain Thai throughout. Every `append([...])` positional list, every `update_row`/`delete_row` 1-indexed `row_number`, and every `find_row_by_key` call is unchanged.
 
 Layered design:
-- **`lib/config.py`** — single source of env/config (loads `.env`), the `TABS` mapping, and tunables (`IMAGES_DIR`, `IMAGE_MAX_SIDE`, `SHEETS_CACHE_TTL`). Import config from here, never re-read env elsewhere.
-- **`lib/sheets.py`** — raw CRUD on tabs + reads. Reads are cached with `@st.cache_data(ttl=SHEETS_CACHE_TTL)`; **every write calls `_invalidate()`** so the next read is fresh. `bills.py` mutations additionally call `sheets.clear_caches()`.
+- **`lib/config.py`** — single source of env/config (loads `.env`), the `TABS` mapping, and tunables (`IMAGES_DIR`, `IMAGE_MAX_SIDE`, `DB_PATH`). Import config from here, never re-read env elsewhere.
+- **`lib/schema.py`** — `COLUMNS` dict (per-tab ordered `[(english, thai_header)]` pairs) and `REQUIRED_KEYS` per tab. Column definitions are driven by live Sheet headers, not `models.py` English names. Also holds `CREATE TABLE` DDL and the `bill_lines` `CREATE VIEW`.
+- **`lib/db.py`** — `connect()` (WAL + `busy_timeout=5000`, per-operation), `init_db()` (idempotent), `_ordered_ids()`. No `streamlit` or `gspread` imports.
+- **`lib/sheets.py`** — same public surface (`customers()`, `products()`, `bills()`, `bill_items()`, `bill_lines()`, `stocks()`, `wholesale_prices()`, `active_customers()`, `active_products()`, `append()`, `update_row()`, `delete_row()`, `find_row_by_key()`), now backed by SQLite via `lib/db.py`. `_invalidate()` and `clear_caches()` call `st.cache_data.clear()` globally (also clears page-level caches). No gspread import.
 - **`lib/bills.py`** — domain logic on top of `sheets`: ID generators (`next_bill_id` → `D0001`, `next_product_code` maps price-group→`P1xx/P2xx/...`), Thai date parse/format (`d/m/yyyy`, no leading zero), price lookups, totals, `suggest_qty` (7-day sales avg minus latest stock), and the create/update/delete operations. **Pages should call `bills.*` for anything beyond a plain read.** Read-once-pass-down: functions accept optional pre-loaded row lists to avoid re-fetching inside loops.
 - **`lib/storage.py`**, **`lib/pdf.py`**, **`lib/auth.py`** — image storage, PDF rendering, authentication (below).
 - **`lib/models.py`** — dataclasses documenting each tab's shape. They are *reference only*; the live code passes raw `dict`s keyed by Thai headers, not these instances.
@@ -36,8 +40,9 @@ Layered design:
 
 ### Things that will bite you
 
-- **`lib/drive.py` is dead code.** Image storage moved to **local disk** (`lib/storage.py`) because the Service Account has no Drive quota (`403 storageQuotaExceeded`) and a personal Gmail can't use a Shared Drive. The Sheet stores only the **bare filename**; `storage.image_src()` resolves it under `IMAGES_DIR` at render time, so moving machines only needs a new `IMAGES_DIR` env. `storage.image_src()` still passes through old `http(s)://` Drive URLs for backward compatibility. **The README still says "File storage: Google Drive" — that is outdated.**
-- **`BillLines` is a derived tab, not written by the app.** `bills.create_bill()` writes `bill` + `bill_item` rows only. The `BillLines` tab (aggregated by price group) is computed by a **formula inside the Google Sheet** and the PDF (`lib/pdf.py` via `bills.lines_for_bill`) reads from it. Hence the eventual-consistency lag the UI warns about ("รอ ~5 วินาที"). Don't try to populate `BillLines` from Python.
+- **`lib/drive.py` is dead code.** Image storage moved to **local disk** (`lib/storage.py`) because the Service Account has no Drive quota (`403 storageQuotaExceeded`) and a personal Gmail can't use a Shared Drive. The Sheet stores only the **bare filename**; `storage.image_src()` resolves it under `IMAGES_DIR` at render time, so moving machines only needs a new `IMAGES_DIR` env. `storage.image_src()` still passes through old `http(s)://` Drive URLs for backward compatibility.
+- **`gspread`/`google-auth` are now used ONLY by the one-time migration script** (`scripts/migrate_sheets_to_sqlite.py`). They are not imported anywhere in `lib/` at runtime. `lib/drive.py` remains dead code.
+- **`bill_lines` is a SQL VIEW, not a Sheet formula.** `bills.create_bill()` writes `bill` + `bill_item` rows only. `bill_lines` is computed by a `CREATE VIEW` in SQLite (`lib/schema.py`) grouping `bill_item` by `(รหัสใบส่ง, กลุ่มราคา)`. The PDF (`lib/pdf.py` via `bills.lines_for_bill`) reads from it. The ~5s eventual-consistency lag that the old Sheet ARRAYFORMULA caused is gone. Don't try to write `bill_lines` rows from Python — it is a read-only VIEW.
 - **Boolean columns are strings.** Sheet "checkbox" values come back as `"TRUE"`/`"FALSE"`/`True`/`1`. Use the existing tolerant checks (`active_customers()` filter, `_normalize_active()`, `bills._to_float()`) instead of truthiness.
 - **`save_image()` re-encodes to JPEG** (EXIF-rotate, downscale to `IMAGE_MAX_SIDE`, quality `IMAGE_JPEG_QUALITY`) and returns the final filename — the extension you pass in is not authoritative.
 - **Image processing in caves.** Mobile uploads can be 3–5 MB; the downscale keeps the Sheet/disk light. If you change image limits, do it via env in `config.py`.

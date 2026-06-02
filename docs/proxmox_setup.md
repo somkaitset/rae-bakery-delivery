@@ -111,7 +111,7 @@ cd ..
 
 ---
 
-## Step 5b — โฟลเดอร์เก็บรูป (local) + Backup
+## Step 5b — โฟลเดอร์เก็บรูป (local) + SQLite DB + Backup
 
 รูปสินค้า/สต็อก **เก็บบน disk ของ LXC** ไม่ได้อัปโหลดขึ้น Google Drive
 (เพราะ Service Account ไม่มี storage quota และบัญชีเป็น personal Gmail จึงใช้
@@ -129,9 +129,32 @@ echo 'IMAGES_DIR=/mnt/data/rae-bakery/images' >> /opt/rae-bakery-delivery/.env
 > ถ้าไม่ตั้ง `IMAGES_DIR` แอปจะใช้ดีฟอลต์ `./data/images` ในโฟลเดอร์ repo — ใช้ได้
 > แต่ควรชี้ออกมานอก repo เพื่อความชัดเจนและให้ backup ครอบง่าย
 
-**Backup:** ตั้ง Proxmox **vzdump** ให้ backup ทั้ง container (รวม volume รูป) เป็นประจำ
+**SQLite DB volume** — ฐานข้อมูลหลัก (Phase 1) เก็บใน SQLite file บน disk เดียวกัน:
+
+```bash
+# DB file อยู่ใน volume เดียวกับรูป (ต้องเป็น local filesystem — WAL ไม่รองรับ NFS/CIFS)
+echo 'DB_PATH=/mnt/data/rae-bakery/app.db' >> /opt/rae-bakery-delivery/.env
+
+# ตรวจสอบ owner
+sudo chown raebakery:raebakery /mnt/data/rae-bakery
+```
+
+> **สำคัญ:** `DB_PATH` ต้องชี้ไป **local filesystem** เท่านั้น (ext4/xfs ฯลฯ)
+> SQLite WAL mode ทำงานไม่ถูกต้องบน NFS หรือ CIFS mount
+
+**One-time cutover จาก Google Sheet:**
+
+```bash
+# dry-run ก่อน — แสดง parity/guard report โดยไม่เขียน DB
+.venv/bin/python scripts/migrate_sheets_to_sqlite.py --dry-run
+
+# รัน migration จริง (ต้องมี SHEET_ID + secrets/service_account.json)
+.venv/bin/python scripts/migrate_sheets_to_sqlite.py
+```
+
+**Backup:** ตั้ง Proxmox **vzdump** ให้ backup ทั้ง container (รวม volume รูป **และ DB**) เป็นประจำ
 — Datacenter → Backup → Add → เลือก CT `rae-bakery` → schedule รายวัน/รายสัปดาห์
-(ข้อมูลธุรกรรมอยู่ใน Google Sheets แล้ว ส่วนนี้ backup เฉพาะ "รูป" ที่อยู่บนเครื่อง)
+(ข้อมูลธุรกรรมทั้งหมดอยู่ใน SQLite file บนเครื่อง — ต้อง backup ด้วย vzdump หรือ snapshot)
 
 ---
 

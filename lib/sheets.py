@@ -1,103 +1,84 @@
 """
-Google Sheets client — อ่าน/เขียนทุกแท็บ
+Data client — อ่าน/เขียนทุกแท็บ (Phase 1: SQLite backend แทน Google Sheets).
+
+หน้าตา public เหมือนเดิมทุกอย่าง (lib/bills.py + pages เรียกใช้ผ่าน surface นี้)
+แต่ข้างในต่อกับ lib/db.py (sqlite3). ที่ระดับโมดูลไม่มี dependency แบบ hard
+ต่อ Streamlit หรือ gspread. เปิด connection ใหม่ต่อทุกการเรียก (WAL +
+busy_timeout) แล้วปิดเสมอ; ไม่ cache connection (Streamlit rerun ข้าม thread +
+sqlite3 check_same_thread=True).
 """
 from __future__ import annotations
 
-from functools import lru_cache
+from contextlib import closing
 from typing import Any
 
-import gspread
-import streamlit as st
-from google.oauth2.service_account import Credentials
-
-from lib.config import GOOGLE_SERVICE_ACCOUNT_PATH, SHEET_ID, SHEETS_CACHE_TTL, TABS
+from lib import db
 
 
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
-
-
-@lru_cache(maxsize=1)
-def _client() -> gspread.Client:
-    creds = Credentials.from_service_account_file(
-        GOOGLE_SERVICE_ACCOUNT_PATH, scopes=SCOPES
-    )
-    return gspread.authorize(creds)
-
-
-@lru_cache(maxsize=1)
-def _spreadsheet() -> gspread.Spreadsheet:
-    return _client().open_by_key(SHEET_ID)
-
-
-def _ws(tab_key: str) -> gspread.Worksheet:
-    """Get worksheet by key (e.g. 'customer' → 'ลูกค้า')."""
-    return _spreadsheet().worksheet(TABS[tab_key])
-
-
-@st.cache_data(ttl=SHEETS_CACHE_TTL, show_spinner=False)
-def _records_cached(tab_key: str) -> list[dict[str, Any]]:
-    return _ws(tab_key).get_all_records()
-
+# --- Reads -----------------------------------------------------------------
 
 def all_records(tab_key: str) -> list[dict[str, Any]]:
-    """อ่านทุกแถวเป็น list of dicts (header → value) — cache ตาม SHEETS_CACHE_TTL."""
-    return _records_cached(tab_key)
+    """อ่านทุกแถวเป็น list of dicts (header ไทย → value), เรียงตามลำดับเพิ่ม (_id)."""
+    with closing(db.ensure_db()) as conn:
+        return db.all_rows(conn, tab_key)
 
 
-def _invalidate() -> None:
-    """ล้าง data cache (เรียกหลังเขียนทุกครั้ง เพื่อให้รอบหน้าอ่านค่าใหม่)."""
-    _records_cached.clear()
-
+# --- Writes ----------------------------------------------------------------
 
 def append(tab_key: str, row: list[Any]) -> None:
     """เพิ่มแถวต่อท้ายตาราง."""
-    _ws(tab_key).append_row(row, value_input_option="USER_ENTERED")
+    with closing(db.ensure_db()) as conn:
+        db.append(conn, tab_key, row)
     _invalidate()
 
 
 def append_many(tab_key: str, rows: list[list[Any]]) -> None:
-    """เพิ่มหลายแถวพร้อมกัน (1 API call แทนหลาย call)."""
+    """เพิ่มหลายแถวพร้อมกัน (1 transaction)."""
     if not rows:
         return
-    _ws(tab_key).append_rows(rows, value_input_option="USER_ENTERED")
+    with closing(db.ensure_db()) as conn:
+        db.append_many(conn, tab_key, rows)
     _invalidate()
 
 
 def update_row(tab_key: str, row_number: int, row: list[Any]) -> None:
-    """อัปเดตทั้งแถว (row_number = 1-indexed sheet row)."""
-    sh = _ws(tab_key)
-    end_col = chr(ord("A") + len(row) - 1)
-    sh.update(
-        f"A{row_number}:{end_col}{row_number}",
-        [row],
-        value_input_option="USER_ENTERED",
-    )
+    """อัปเดตทั้งแถว (row_number = 1-indexed sheet row; header=1, แถวข้อมูลแรก=2)."""
+    with closing(db.ensure_db()) as conn:
+        db.update_row(conn, tab_key, row_number, row)
+    _invalidate()
+
+
+def delete_row(tab_key: str, row_number: int) -> None:
+    """ลบแถว (row_number = 1-indexed sheet row)."""
+    with closing(db.ensure_db()) as conn:
+        db.delete_row(conn, tab_key, row_number)
     _invalidate()
 
 
 def find_row_by_key(tab_key: str, key_value: str, key_col: int = 1) -> int | None:
     """หาเลข row ที่คอลัมน์ key_col = key_value (เริ่มที่ row 2 เพราะ row 1 = header)."""
-    sh = _ws(tab_key)
-    try:
-        cell = sh.find(key_value, in_column=key_col)
-        return cell.row if cell else None
-    except gspread.exceptions.CellNotFound:
-        return None
+    with closing(db.ensure_db()) as conn:
+        return db.find_row_number(conn, tab_key, key_value, key_col)
 
 
-def delete_row(tab_key: str, row_number: int) -> None:
-    _ws(tab_key).delete_rows(row_number)
-    _invalidate()
-
+# --- Cache invalidation ----------------------------------------------------
 
 def clear_caches() -> None:
-    """ใช้หลังเขียนข้อมูลเสร็จ เพื่อให้รอบหน้าอ่านข้อมูลใหม่."""
-    _client.cache_clear()
-    _spreadsheet.cache_clear()
-    _invalidate()
+    """ล้าง cache ระดับหน้า (Streamlit) หลังเขียนข้อมูล — ไม่พึ่ง streamlit แบบ hard.
+
+    soft optional import: ถ้ารันใต้ Streamlit ก็เคลียร์ st.cache_data (รวม cache
+    ระดับหน้าเช่น pages/2 ที่ ttl=30); ถ้ารัน headless ก็เงียบ ๆ ไม่ throw.
+    เรียกบ่อยใน bills.py — ต้องไม่ raise.
+    """
+    try:
+        import importlib
+
+        importlib.import_module("streamlit").cache_data.clear()
+    except Exception:
+        pass
+
+
+_invalidate = clear_caches
 
 
 # --- Convenience wrappers (เรียกใช้ใน pages) ---

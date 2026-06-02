@@ -35,6 +35,12 @@ IMAGES_DIR = Path(os.getenv("IMAGES_DIR", str(BASE_DIR / "data" / "images")))
 IMAGE_MAX_SIDE = int(os.getenv("IMAGE_MAX_SIDE", "1600"))
 IMAGE_JPEG_QUALITY = int(os.getenv("IMAGE_JPEG_QUALITY", "85"))
 
+# --- SQLite database (Phase 1: แทน Google Sheets) ---
+# ไฟล์ฐานข้อมูล SQLite — ดู lib/db.py, lib/schema.py
+# บน Proxmox ให้ตั้ง env DB_PATH ชี้ไป local volume ที่ backup ครอบไว้
+# เช่น DB_PATH=/mnt/data/rae-bakery/app.db (WAL ต้องการ local fs — ห้าม NFS/CIFS)
+DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "data" / "app.db")))
+
 # --- Data cache ---
 # อายุ cache ข้อมูลที่อ่านจาก Google Sheets (วินาที) — ลดการยิง API ทุก rerun
 # จะถูกเคลียร์ทันทีเมื่อมีการเขียน (เพิ่ม/แก้/ลบ) อยู่แล้ว

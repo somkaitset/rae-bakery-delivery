@@ -1,11 +1,11 @@
 # rae-bakery-delivery
 
-ระบบบันทึก/พิมพ์บิลส่งสินค้าเบเกอรี่ตามโรงเรียน — Streamlit + Google Sheet
+ระบบบันทึก/พิมพ์บิลส่งสินค้าเบเกอรี่ตามโรงเรียน — Streamlit + SQLite
 
 ## Stack
 - **Frontend / Backend:** Streamlit (Python)
-- **Database:** Google Sheet (`เรเบเกอรี่-ฐานข้อมูลส่งสินค้า`)
-- **File storage:** Local disk — รูปสินค้า/สต็อก LINE เก็บบน disk ของเครื่องผ่าน `lib/storage.py` (Service Account ไม่มี Drive quota) โดยใน Sheet เก็บแค่ชื่อไฟล์; บิล PDF สร้างแล้วดาวน์โหลดทันที (ไม่อัปโหลด)
+- **Database:** SQLite (`lib/db.py` + `lib/schema.py`) — single source of truth ตั้งแต่ Phase 1; Google Sheet ถูก freeze ไว้เป็น backup อ่านอย่างเดียว; นำเข้าครั้งเดียวผ่าน `scripts/migrate_sheets_to_sqlite.py`
+- **File storage:** Local disk — รูปสินค้า/สต็อก LINE เก็บบน disk ของเครื่องผ่าน `lib/storage.py` (Service Account ไม่มี Drive quota) โดย DB เก็บแค่ชื่อไฟล์; บิล PDF สร้างแล้วดาวน์โหลดทันที (ไม่อัปโหลด)
 - **Auth:** streamlit-authenticator (bcrypt, แยก password รายคน)
 - **Deploy:** Proxmox LXC (Debian 12) + Tailscale (เข้าจากนอกร้านได้)
 
@@ -30,11 +30,13 @@ pip install -r requirements.txt
 
 # config
 cp .env.example .env
-# แก้ .env: ใส่ path service_account.json + SHEET_ID
-# (Drive IDs ไม่จำเป็นแล้ว — รูปเก็บ local; dev ปล่อย IMAGES_DIR ว่างได้ = ./data/images)
+# แก้ .env: ตั้ง DB_PATH (default = ./data/app.db) และ IMAGES_DIR (default = ./data/images)
+# service_account.json ใช้เฉพาะ migration script เท่านั้น — ไม่จำเป็นสำหรับ dev ปกติ
 
-# Google Service Account
-# วาง JSON key ลงใน secrets/service_account.json (ดู docs/google_setup.md)
+# One-time migration from Google Sheet (ถ้ายังไม่มี DB)
+# ใส่ SHEET_ID + วาง secrets/service_account.json แล้วรัน:
+# .venv/bin/python scripts/migrate_sheets_to_sqlite.py --dry-run
+# .venv/bin/python scripts/migrate_sheets_to_sqlite.py
 
 # Thai font (สำหรับ PDF บิล)
 # ดาวน์โหลด Sarabun-Regular.ttf + Sarabun-Bold.ttf จาก Google Fonts
@@ -62,14 +64,17 @@ pages/                          # Streamlit auto-detect multipage
 lib/
 ├── config.py                   # env vars + tab name mapping
 ├── auth.py                     # streamlit-authenticator wrapper
-├── sheets.py                   # Google Sheets client (gspread) + read cache/invalidate
+├── db.py                       # SQLite connect (WAL, per-op), init_db, _ordered_ids
+├── schema.py                   # COLUMNS/REQUIRED_KEYS per tab + CREATE TABLE/VIEW DDL
+├── sheets.py                   # same public interface as before, backed by SQLite (no gspread)
 ├── bills.py                    # domain logic: ID gen, ราคา, ยอดรวม, create/update/delete, suggest_qty
 ├── storage.py                  # เก็บรูป local (ย่อ/หมุน/JPEG) — แทน Drive
 ├── pdf.py                      # PDF บิลส่งของ (ฟอนต์ Sarabun)
 ├── drive.py                    # ⚠️ legacy/unused (เหลือไว้เผื่อ migrate กลับ Shared Drive)
 └── models.py                   # dataclass อ้างอิงโครงสร้างแต่ละแท็บ (reference เฉยๆ)
 scripts/
-└── gen_password.py             # gen bcrypt hash สำหรับ auth_config
+├── gen_password.py             # gen bcrypt hash สำหรับ auth_config
+└── migrate_sheets_to_sqlite.py # one-time import จาก Google Sheet → SQLite (ใช้ gspread)
 deploy/                         # Proxmox LXC deployment
 ├── streamlit.service           # systemd unit
 ├── install.sh                  # provision LXC ใหม่
