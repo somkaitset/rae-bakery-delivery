@@ -38,6 +38,7 @@ htmlcov/
 # --- Agent / tooling state (local scratch, not shared) ---
 .omc/
 .claude/settings.local.json
+CLAUDE.local.md
 
 # --- OS ---
 Thumbs.db
