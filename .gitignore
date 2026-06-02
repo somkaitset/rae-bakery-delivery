@@ -35,18 +35,25 @@ htmlcov/
 *~
 .DS_Store
 
+# --- Agent / tooling state (local scratch, not shared) ---
+.omc/
+.claude/settings.local.json
+
 # --- OS ---
 Thumbs.db
 
 # --- Logs / runtime ---
 *.log
 logs/
-data/local/
 
-# --- Generated PDF/images (เก็บใน Drive ไม่เก็บใน repo) ---
+# --- Generated PDF/output (สร้างชั่วคราว ไม่เก็บใน repo) ---
 generated/
 *.pdf
 output/
 
-# Local image storage (รูปสินค้า/สต็อก — เก็บบนเครื่อง ไม่ commit)
+# Local image storage (รูปสินค้า/สต็อก — เก็บบนเครื่องผ่าน lib/storage.py ไม่ commit)
 data/
+
+# Self-signed TLS certs for LAN HTTPS (camera/getUserMedia needs secure context)
+certs/
+*.pem
