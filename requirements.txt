@@ -23,3 +23,6 @@ PyYAML>=6.0,<7.0
 
 # --- Date / timezone ---
 pytz>=2024.1
+
+# --- Test ---
+pytest>=8,<9

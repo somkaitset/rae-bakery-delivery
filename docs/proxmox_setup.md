@@ -111,6 +111,53 @@ cd ..
 
 ---
 
+## Step 5b — โฟลเดอร์เก็บรูป (local) + SQLite DB + Backup
+
+รูปสินค้า/สต็อก **เก็บบน disk ของ LXC** ไม่ได้อัปโหลดขึ้น Google Drive
+(เพราะ Service Account ไม่มี storage quota และบัญชีเป็น personal Gmail จึงใช้
+Shared Drive ไม่ได้ — ดู `lib/storage.py`)
+
+```bash
+# สร้าง volume ถาวรสำหรับรูป (แยกจาก repo เพื่อให้ git pull ไม่แตะ)
+sudo mkdir -p /mnt/data/rae-bakery/images
+sudo chown -R raebakery:raebakery /mnt/data/rae-bakery
+
+# ชี้แอปมาที่ path นี้ใน .env
+echo 'IMAGES_DIR=/mnt/data/rae-bakery/images' >> /opt/rae-bakery-delivery/.env
+```
+
+> ถ้าไม่ตั้ง `IMAGES_DIR` แอปจะใช้ดีฟอลต์ `./data/images` ในโฟลเดอร์ repo — ใช้ได้
+> แต่ควรชี้ออกมานอก repo เพื่อความชัดเจนและให้ backup ครอบง่าย
+
+**SQLite DB volume** — ฐานข้อมูลหลัก (Phase 1) เก็บใน SQLite file บน disk เดียวกัน:
+
+```bash
+# DB file อยู่ใน volume เดียวกับรูป (ต้องเป็น local filesystem — WAL ไม่รองรับ NFS/CIFS)
+echo 'DB_PATH=/mnt/data/rae-bakery/app.db' >> /opt/rae-bakery-delivery/.env
+
+# ตรวจสอบ owner
+sudo chown raebakery:raebakery /mnt/data/rae-bakery
+```
+
+> **สำคัญ:** `DB_PATH` ต้องชี้ไป **local filesystem** เท่านั้น (ext4/xfs ฯลฯ)
+> SQLite WAL mode ทำงานไม่ถูกต้องบน NFS หรือ CIFS mount
+
+**One-time cutover จาก Google Sheet:**
+
+```bash
+# dry-run ก่อน — แสดง parity/guard report โดยไม่เขียน DB
+.venv/bin/python scripts/migrate_sheets_to_sqlite.py --dry-run
+
+# รัน migration จริง (ต้องมี SHEET_ID + secrets/service_account.json)
+.venv/bin/python scripts/migrate_sheets_to_sqlite.py
+```
+
+**Backup:** ตั้ง Proxmox **vzdump** ให้ backup ทั้ง container (รวม volume รูป **และ DB**) เป็นประจำ
+— Datacenter → Backup → Add → เลือก CT `rae-bakery` → schedule รายวัน/รายสัปดาห์
+(ข้อมูลธุรกรรมทั้งหมดอยู่ใน SQLite file บนเครื่อง — ต้อง backup ด้วย vzdump หรือ snapshot)
+
+---
+
 ## Step 6 — ติดตั้ง systemd service
 
 ```bash
@@ -161,3 +208,6 @@ cd /opt/rae-bakery-delivery
 | `Address already in use :8501` | มี Streamlit ตัวอื่นรันอยู่ — `sudo lsof -i :8501` → kill |
 | มือถือเข้าไม่ได้ | ดู `tailscale status` ทั้ง 2 ฝั่ง online ไหม |
 | `sudo systemctl status rae-bakery` แดง | `sudo journalctl -u rae-bakery -n 50` ดู error |
+| กล้องใช้ไม่ได้ (`getUserMedia`) | ต้องเข้าผ่าน **HTTPS** หรือ `localhost` — ตั้ง reverse proxy (Nginx Proxy Manager) ให้ TLS |
+| บันทึกรูปแล้ว error / `storageQuotaExceeded` | โค้ดเก่าใช้ Drive — เวอร์ชันนี้เก็บ local แล้ว เช็ก `IMAGES_DIR` เขียนได้ (`chown`) |
+| รูปหายหลังรีสตาร์ท/redeploy | `IMAGES_DIR` ชี้เข้าโฟลเดอร์ที่ถูกลบ — ต้องชี้ออกนอก repo เช่น `/mnt/data/...` |

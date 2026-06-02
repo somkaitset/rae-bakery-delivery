@@ -1,0 +1,23 @@
+# Streamlit config — permissive for LAN access from mobile/PC via network IP
+# (สำหรับ local Proxmox/dev — ไม่ใช้ใน internet-exposed deploy)
+
+[server]
+# ปิด XSRF protection — ช่วย mobile/PC ใน LAN ที่เปิดผ่าน 192.168.x.x
+enableXsrfProtection = false
+# ปิด CORS check — ให้ WebSocket จาก IP อื่นผ่าน
+enableCORS = false
+# bind ทุก interface
+address = "0.0.0.0"
+port = 8501
+headless = true
+# HTTP ล้วน — TLS termination ทำที่ Nginx Proxy Manager ด้านหน้า
+# (กล้อง/getUserMedia จะ secure context ผ่าน HTTPS ที่ NPM ให้)
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#FF6B35"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#FFF5E1"

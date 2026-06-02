@@ -57,18 +57,18 @@ def _max_seq(rows: list[dict], key_field: str, prefix: str) -> int:
 
 def next_bill_id(existing_bills: list[dict] | None = None) -> str:
     bs = existing_bills if existing_bills is not None else sheets.bills()
-    return f"D{_max_seq(bs, 'รหัสใบส่ง', 'D') + 1:04d}"
+    return f"D{_max_seq(bs, 'bill_id', 'D') + 1:04d}"
 
 
 def next_item_seq(existing_items: list[dict] | None = None) -> int:
     """คืนเลข seq ถัดไป (ใช้ format ภายหลัง: f'I{seq:04d}')"""
     items = existing_items if existing_items is not None else sheets.bill_items()
-    return _max_seq(items, 'รหัสรายการ', 'I') + 1
+    return _max_seq(items, 'item_id', 'I') + 1
 
 
 def next_customer_code(existing_customers: list[dict] | None = None) -> str:
     cs = existing_customers if existing_customers is not None else sheets.customers()
-    return f"C{_max_seq(cs, 'รหัสลูกค้า', 'C') + 1:03d}"
+    return f"C{_max_seq(cs, 'code', 'C') + 1:03d}"
 
 
 def next_product_code(price_group: str, existing_products: list[dict] | None = None) -> str:
@@ -83,7 +83,7 @@ def next_product_code(price_group: str, existing_products: list[dict] | None = N
     prefix = prefix_map.get(str(price_group), "P9")
     nums = []
     for p in ps:
-        pc = str(p.get("รหัสสินค้า", ""))
+        pc = str(p.get("code", ""))
         if pc.startswith(prefix) and len(pc) >= 4:
             try:
                 nums.append(int(pc[2:]))
@@ -95,7 +95,7 @@ def next_product_code(price_group: str, existing_products: list[dict] | None = N
 
 def next_stock_id(existing_stocks: list[dict] | None = None) -> str:
     ss = existing_stocks if existing_stocks is not None else sheets.stocks()
-    return f"S{_max_seq(ss, 'รหัสสต็อก', 'S') + 1:04d}"
+    return f"S{_max_seq(ss, 'stock_id', 'S') + 1:04d}"
 
 
 # --- Price lookup ---
@@ -107,7 +107,7 @@ def price_map(wholesale_rows: list[dict] | None = None) -> dict[str, float]:
     """
     rows = wholesale_rows if wholesale_rows is not None else sheets.wholesale_prices()
     return {
-        str(r.get("รหัสราคา", "")): _to_float(r.get("ราคาส่ง", 0))
+        str(r.get("price_id", "")): _to_float(r.get("wholesale_price", 0))
         for r in rows
     }
 
@@ -123,26 +123,26 @@ def unit_price(price_set: str, price_group: str, prices: dict[str, float] | None
 def bill_total(bill_id: str, items: list[dict] | None = None) -> float:
     items = items if items is not None else sheets.bill_items()
     return sum(
-        _to_float(it.get("จำนวนเงิน", 0))
+        _to_float(it.get("amount", 0))
         for it in items
-        if str(it.get("รหัสใบส่ง", "")) == bill_id
-        and _to_float(it.get("จำนวน", 0)) > 0
+        if str(it.get("bill_id", "")) == bill_id
+        and _to_float(it.get("qty", 0)) > 0
     )
 
 
 def bill_qty_total(bill_id: str, items: list[dict] | None = None) -> int:
     items = items if items is not None else sheets.bill_items()
     return sum(
-        int(_to_float(it.get("จำนวน", 0)))
+        int(_to_float(it.get("qty", 0)))
         for it in items
-        if str(it.get("รหัสใบส่ง", "")) == bill_id
+        if str(it.get("bill_id", "")) == bill_id
     )
 
 
 def lines_for_bill(bill_id: str, bill_lines_rows: list[dict] | None = None) -> list[dict]:
     """คืน BillLines (สรุปตามกลุ่มราคา) สำหรับใบนี้"""
     rows = bill_lines_rows if bill_lines_rows is not None else sheets.bill_lines()
-    return [r for r in rows if str(r.get("รหัสใบส่ง", "")) == bill_id]
+    return [r for r in rows if str(r.get("bill_id", "")) == bill_id]
 
 
 # --- Mutations ---
@@ -161,12 +161,12 @@ def create_bill(
     # โหลดข้อมูลที่จำเป็นครั้งเดียว
     existing_bills = sheets.bills()
     existing_items = sheets.bill_items()
-    customers = {c.get("รหัสลูกค้า"): c for c in sheets.customers()}
-    products = {p.get("รหัสสินค้า"): p for p in sheets.products()}
+    customers = {c.get("code"): c for c in sheets.customers()}
+    products = {p.get("code"): p for p in sheets.products()}
     prices = price_map()
 
     bill_id = next_bill_id(existing_bills)
-    price_set = customers.get(customer_code, {}).get("ชุดราคา", "มาตรฐาน")
+    price_set = customers.get(customer_code, {}).get("price_set", "มาตรฐาน")
 
     # bill row
     sheets.append("bill", [
@@ -184,7 +184,7 @@ def create_bill(
         if qty <= 0:
             continue
         prod = products.get(product_code, {})
-        price_group = str(prod.get("กลุ่มราคา", ""))
+        price_group = str(prod.get("price_group", ""))
         unit = unit_price(price_set, price_group, prices)
         amount = qty * unit
         new_item_rows.append([
@@ -217,7 +217,7 @@ def delete_bill(bill_id: str) -> int:
     item_rows = [
         i + 2  # row 1 = header, +2 because enumerate starts 0
         for i, it in enumerate(items)
-        if str(it.get("รหัสใบส่ง", "")) == bill_id
+        if str(it.get("bill_id", "")) == bill_id
     ]
     for row_num in sorted(item_rows, reverse=True):
         sheets.delete_row("bill_item", row_num)
@@ -226,7 +226,7 @@ def delete_bill(bill_id: str) -> int:
     # delete bill
     bills_data = sheets.bills()
     for i, b in enumerate(bills_data):
-        if str(b.get("รหัสใบส่ง", "")) == bill_id:
+        if str(b.get("bill_id", "")) == bill_id:
             sheets.delete_row("bill", i + 2)
             deleted += 1
             break
@@ -257,7 +257,7 @@ def create_product(name: str, price_group: str, image_url: str = "",
     if display_order == 0:
         existing = sheets.products()
         display_order = max(
-            (int(_to_float(p.get("ลำดับแสดง", 0))) for p in existing),
+            (int(_to_float(p.get("display_order", 0))) for p in existing),
             default=0,
         ) + 1
     sheets.append("product",
@@ -270,6 +270,12 @@ def update_product(row_number: int, code: str, name: str, price_group: str,
                    image_url: str, display_order: int, active: bool) -> None:
     sheets.update_row("product", row_number,
                       [code, name, price_group, image_url, display_order, active])
+    sheets.clear_caches()
+
+
+def delete_product(row_number: int) -> None:
+    """ลบสินค้า 1 แถวออกจากชีต (row_number = 1-indexed sheet row)."""
+    sheets.delete_row("product", row_number)
     sheets.clear_caches()
 
 
@@ -315,22 +321,22 @@ def suggest_qty(
     bill_to_cust = {}
     bill_to_date = {}
     for b in bills:
-        bid = str(b.get("รหัสใบส่ง", ""))
-        bill_to_cust[bid] = str(b.get("รหัสลูกค้า", ""))
-        d = parse_date(b.get("วันที่"))
+        bid = str(b.get("bill_id", ""))
+        bill_to_cust[bid] = str(b.get("customer_code", ""))
+        d = parse_date(b.get("date"))
         if d:
             bill_to_date[bid] = d.toordinal()
 
     qtys = []
     for it in items:
-        bid = str(it.get("รหัสใบส่ง", ""))
+        bid = str(it.get("bill_id", ""))
         if bill_to_cust.get(bid) != customer_code:
             continue
-        if str(it.get("รหัสสินค้า", "")) != product_code:
+        if str(it.get("product_code", "")) != product_code:
             continue
         if bill_to_date.get(bid, 0) < cutoff_sales:
             continue
-        q = int(_to_float(it.get("จำนวน", 0)))
+        q = int(_to_float(it.get("qty", 0)))
         if q > 0:
             qtys.append(q)
 
@@ -339,18 +345,18 @@ def suggest_qty(
     latest_stock = 0
     latest_date = -1
     for s in stocks:
-        if str(s.get("รหัสลูกค้า", "")) != customer_code:
+        if str(s.get("customer_code", "")) != customer_code:
             continue
-        if str(s.get("รหัสสินค้า", "")) != product_code:
+        if str(s.get("product_code", "")) != product_code:
             continue
-        d = parse_date(s.get("วันที่"))
+        d = parse_date(s.get("date"))
         if not d:
             continue
         if d.toordinal() < cutoff_stock:
             continue
         if d.toordinal() > latest_date:
             latest_date = d.toordinal()
-            latest_stock = int(_to_float(s.get("จำนวนคงเหลือ", 0)))
+            latest_stock = int(_to_float(s.get("remaining", 0)))
 
     return max(0, avg_qty - latest_stock)
 
