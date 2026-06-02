@@ -52,6 +52,18 @@ streamlit run app.py
 # เปิด http://localhost:8501
 ```
 
+## Run (เริ่ม Streamlit)
+
+ใช้งานปกติหลังตั้งค่าครั้งแรกเสร็จแล้ว — รันได้เลยโดยไม่ต้อง `activate` venv:
+
+```bash
+# dev — เปิด http://localhost:8501
+.venv/bin/streamlit run app.py
+```
+
+ถ้า `activate` venv ไว้แล้ว (`source .venv/bin/activate`) ใช้สั้นลงเป็น `streamlit run app.py` ได้
+บนเครื่อง deploy (Proxmox LXC) แอปรันเป็น systemd service `rae-bakery` — ไม่ต้องสั่ง `streamlit` เอง ดู `deploy/update.sh`
+
 ## Project structure
 ```
 app.py                          # Streamlit entry (login + dashboard)
