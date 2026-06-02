@@ -5,7 +5,7 @@
 ## Stack
 - **Frontend / Backend:** Streamlit (Python)
 - **Database:** Google Sheet (`เรเบเกอรี่-ฐานข้อมูลส่งสินค้า`)
-- **File storage:** Google Drive (รูปสินค้า, รูปสต็อก LINE, PDF บิล)
+- **File storage:** Local disk — รูปสินค้า/สต็อก LINE เก็บบน disk ของเครื่องผ่าน `lib/storage.py` (Service Account ไม่มี Drive quota) โดยใน Sheet เก็บแค่ชื่อไฟล์; บิล PDF สร้างแล้วดาวน์โหลดทันที (ไม่อัปโหลด)
 - **Auth:** streamlit-authenticator (bcrypt, แยก password รายคน)
 - **Deploy:** Proxmox LXC (Debian 12) + Tailscale (เข้าจากนอกร้านได้)
 
@@ -30,7 +30,8 @@ pip install -r requirements.txt
 
 # config
 cp .env.example .env
-# แก้ .env: ใส่ path service_account.json + Sheet/Drive IDs
+# แก้ .env: ใส่ path service_account.json + SHEET_ID
+# (Drive IDs ไม่จำเป็นแล้ว — รูปเก็บ local; dev ปล่อย IMAGES_DIR ว่างได้ = ./data/images)
 
 # Google Service Account
 # วาง JSON key ลงใน secrets/service_account.json (ดู docs/google_setup.md)
@@ -61,10 +62,12 @@ pages/                          # Streamlit auto-detect multipage
 lib/
 ├── config.py                   # env vars + tab name mapping
 ├── auth.py                     # streamlit-authenticator wrapper
-├── sheets.py                   # Google Sheets client (gspread)
-├── drive.py                    # Google Drive (รูป + PDF upload)
-├── pdf.py                      # PDF บิลส่งของ
-└── models.py                   # dataclass: Customer, Product, Bill, ...
+├── sheets.py                   # Google Sheets client (gspread) + read cache/invalidate
+├── bills.py                    # domain logic: ID gen, ราคา, ยอดรวม, create/update/delete, suggest_qty
+├── storage.py                  # เก็บรูป local (ย่อ/หมุน/JPEG) — แทน Drive
+├── pdf.py                      # PDF บิลส่งของ (ฟอนต์ Sarabun)
+├── drive.py                    # ⚠️ legacy/unused (เหลือไว้เผื่อ migrate กลับ Shared Drive)
+└── models.py                   # dataclass อ้างอิงโครงสร้างแต่ละแท็บ (reference เฉยๆ)
 scripts/
 └── gen_password.py             # gen bcrypt hash สำหรับ auth_config
 deploy/                         # Proxmox LXC deployment
