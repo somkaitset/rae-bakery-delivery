@@ -65,7 +65,7 @@ def _cell(value: Any) -> Any:
 # --- Reads -----------------------------------------------------------------
 
 def all_rows(conn: sqlite3.Connection, tab_key: str) -> list[dict[str, Any]]:
-    """Return every row as a dict keyed by the live Thai header, ordered by _id."""
+    """Return every row as a dict keyed by the English column name, ordered by _id."""
     pairs = (
         schema.BILL_LINES_COLUMNS
         if tab_key == "bill_lines"
@@ -75,7 +75,7 @@ def all_rows(conn: sqlite3.Connection, tab_key: str) -> list[dict[str, Any]]:
     order = "" if tab_key == "bill_lines" else " ORDER BY _id"
     rows = conn.execute(f'SELECT {eng_cols} FROM "{tab_key}"{order}').fetchall()
     return [
-        {thai: _cell(row[eng]) for eng, thai in pairs}
+        {eng: _cell(row[eng]) for eng, _ in pairs}
         for row in rows
     ]
 

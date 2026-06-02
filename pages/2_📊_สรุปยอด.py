@@ -27,15 +27,15 @@ st.title("📊 สรุปยอดส่งสินค้า")
 def _load() -> tuple[pd.DataFrame, dict, dict]:
     bs = sheets.bills()
     its = sheets.bill_items()
-    customers_map = {c.get("รหัสลูกค้า"): c.get("ชื่อลูกค้า") for c in sheets.customers()}
-    products_map = {p.get("รหัสสินค้า"): p.get("ชื่อสินค้า") for p in sheets.products()}
+    customers_map = {c.get("code"): c.get("name") for c in sheets.customers()}
+    products_map = {p.get("code"): p.get("name") for p in sheets.products()}
 
     # build bills dataframe
     rows = []
     for b in bs:
-        bid = str(b.get("รหัสใบส่ง", ""))
-        d = bills.parse_date(b.get("วันที่")) or date(1900, 1, 1)
-        cust_code = str(b.get("รหัสลูกค้า", ""))
+        bid = str(b.get("bill_id", ""))
+        d = bills.parse_date(b.get("date")) or date(1900, 1, 1)
+        cust_code = str(b.get("customer_code", ""))
         rows.append({
             "รหัสใบส่ง": bid,
             "วันที่": d,
@@ -43,7 +43,7 @@ def _load() -> tuple[pd.DataFrame, dict, dict]:
             "ลูกค้า": customers_map.get(cust_code, cust_code),
             "จำนวนชิ้น": bills.bill_qty_total(bid, its),
             "รวมเป็นเงิน": bills.bill_total(bid, its),
-            "สถานะ": str(b.get("สถานะ", "")),
+            "สถานะ": str(b.get("status", "")),
         })
     df = pd.DataFrame(rows)
     if not df.empty:

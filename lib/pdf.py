@@ -82,7 +82,7 @@ def generate_bill_pdf(
         rightMargin=12 * mm,
         topMargin=12 * mm,
         bottomMargin=12 * mm,
-        title=f"บิล {bill.get('รหัสใบส่ง', '')}",
+        title=f"บิล {bill.get('bill_id', '')}",
     )
 
     title_st = ParagraphStyle(
@@ -105,9 +105,9 @@ def generate_bill_pdf(
         Paragraph("เรเบเกอรี่", title_st),
         Paragraph("บิลส่งของ", sub_st),
         Paragraph(
-            f"ลูกค้า: <b>{customer.get('ชื่อลูกค้า', '')}</b>"
+            f"ลูกค้า: <b>{customer.get('name', '')}</b>"
             f"&nbsp;&nbsp;&nbsp;&nbsp;"
-            f"วันที่: <b>{bill.get('วันที่', '')}</b>",
+            f"วันที่: <b>{bill.get('date', '')}</b>",
             label_st,
         ),
         Spacer(1, 4),
@@ -116,17 +116,17 @@ def generate_bill_pdf(
     # Table of lines (sort by price group ascending)
     def _pg_key(line: dict) -> int:
         try:
-            return int(line.get("กลุ่มราคา", 0))
+            return int(line.get("price_group", 0))
         except (TypeError, ValueError):
             return 0
 
     table_data: list[list] = [["จำนวน", "รายการ (กลุ่มราคา)", "หน่วยละ", "จำนวนเงิน"]]
     for line in sorted(lines, key=_pg_key):
         table_data.append([
-            str(line.get("จำนวน", "")),
-            f"{line.get('กลุ่มราคา', '')} บาท",
-            f"{float(line.get('หน่วยละ', 0)):.2f}",
-            f"{float(line.get('จำนวนเงิน', 0)):,.2f}",
+            str(line.get("qty", "")),
+            f"{line.get('price_group', '')} บาท",
+            f"{float(line.get('unit_price', 0)):.2f}",
+            f"{float(line.get('amount', 0)):,.2f}",
         ])
 
     table = Table(table_data, colWidths=[20 * mm, 50 * mm, 25 * mm, 30 * mm])

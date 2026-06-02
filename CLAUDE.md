@@ -24,9 +24,9 @@ There is a `pytest` suite under `tests/` — run it with `.venv/bin/pytest -q`. 
 
 ## Architecture
 
-**SQLite is the single source of truth (Phase 1).** `lib/db.py` + `lib/schema.py` define the schema; `lib/sheets.py` is backed by SQLite (gspread removed from it) but keeps the **same `list[dict]`-keyed-by-Thai-header interface** it always had — so `lib/bills.py` and all pages are unchanged. The Google Sheet is retired/frozen as a read-only backup; the one-time import is done via `scripts/migrate_sheets_to_sqlite.py`. Thai column-name keys are still dict lookups (same as before) — a typo still silently returns empty.
+**SQLite is the single source of truth.** `lib/db.py` + `lib/schema.py` define the schema; `lib/sheets.py` is backed by SQLite (gspread removed from it). The Google Sheet is retired/frozen as a read-only backup; the one-time import is done via `scripts/migrate_sheets_to_sqlite.py`. `lib/schema.py` `COLUMNS` is the single source of truth, mapping each tab's English column ⇄ its Thai header.
 
-**Phase 2 (English column/key rename across pages) is NOT yet done.** Keys remain Thai throughout. Every `append([...])` positional list, every `update_row`/`delete_row` 1-indexed `row_number`, and every `find_row_by_key` call is unchanged.
+**Phase 2 (English keys) is done.** `sheets.*` returns rows as `list[dict]` keyed by **English** column names; `lib/bills.py`, `lib/pdf.py`, and all 5 pages read English keys. **Thai survives only as UI display labels** — widget text inline, and `st.dataframe`/`st.data_editor` headers renamed back to Thai via `lib/labels.py::thai_columns(tab)` (derived from `schema.COLUMNS`). Key lookups are still `dict.get`, so a wrong key returns empty — but the keys are now stable English. Unchanged from Phase 1: positional writes (`append([...])` in schema column order), `update_row`/`delete_row` 1-indexed `row_number`, and `find_row_by_key`. The live Google Sheet (read only by the migration) still has Thai headers — `schema.COLUMNS` maps them.
 
 Layered design:
 - **`lib/config.py`** — single source of env/config (loads `.env`), the `TABS` mapping, and tunables (`IMAGES_DIR`, `IMAGE_MAX_SIDE`, `DB_PATH`). Import config from here, never re-read env elsewhere.

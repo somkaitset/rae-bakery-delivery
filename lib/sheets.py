@@ -87,7 +87,7 @@ def customers() -> list[dict]:
 
 
 def active_customers() -> list[dict]:
-    return [c for c in customers() if c.get("ใช้งาน") in (True, "TRUE", "true", 1, "1")]
+    return [c for c in customers() if c.get("active") in (True, "TRUE", "true", 1, "1")]
 
 
 def products() -> list[dict]:
@@ -95,7 +95,7 @@ def products() -> list[dict]:
 
 
 def active_products() -> list[dict]:
-    return [p for p in products() if p.get("ใช้งาน") in (True, "TRUE", "true", 1, "1")]
+    return [p for p in products() if p.get("active") in (True, "TRUE", "true", 1, "1")]
 
 
 def bills() -> list[dict]:

@@ -32,7 +32,7 @@ with tab_list:
     try:
         bills_data = sheets.bills()
         items_data = sheets.bill_items()
-        customers_map = {c.get("รหัสลูกค้า"): c.get("ชื่อลูกค้า") for c in sheets.customers()}
+        customers_map = {c.get("code"): c.get("name") for c in sheets.customers()}
     except Exception as e:
         st.error(f"อ่านข้อมูลไม่ได้: {e}")
         st.stop()
@@ -43,14 +43,14 @@ with tab_list:
         # สร้างตาราง pretty
         rows = []
         for b in bills_data:
-            bid = str(b.get("รหัสใบส่ง", ""))
+            bid = str(b.get("bill_id", ""))
             rows.append({
                 "รหัส": bid,
-                "วันที่": b.get("วันที่", ""),
-                "ลูกค้า": customers_map.get(str(b.get("รหัสลูกค้า", "")), b.get("รหัสลูกค้า", "")),
+                "วันที่": b.get("date", ""),
+                "ลูกค้า": customers_map.get(str(b.get("customer_code", "")), b.get("customer_code", "")),
                 "จำนวนชิ้น": bills.bill_qty_total(bid, items_data),
                 "รวมเป็นเงิน": bills.bill_total(bid, items_data),
-                "สถานะ": b.get("สถานะ", ""),
+                "สถานะ": b.get("status", ""),
             })
         df = pd.DataFrame(rows)
         # sort: วันที่ desc
@@ -69,7 +69,7 @@ with tab_list:
 
         st.divider()
         st.subheader("จัดการใบ")
-        bill_ids = [str(b.get("รหัสใบส่ง", "")) for b in bills_data]
+        bill_ids = [str(b.get("bill_id", "")) for b in bills_data]
         col1, col2 = st.columns([2, 1])
         with col1:
             selected = st.selectbox("เลือกใบส่ง", options=bill_ids, key="manage_bill_select")
@@ -79,9 +79,9 @@ with tab_list:
             print_clicked = st.button("📄 พิมพ์บิล (PDF)", type="primary", use_container_width=True)
 
         if print_clicked and selected:
-            bill = next((b for b in bills_data if str(b.get("รหัสใบส่ง")) == selected), {})
+            bill = next((b for b in bills_data if str(b.get("bill_id")) == selected), {})
             cust = next(
-                (c for c in sheets.customers() if str(c.get("รหัสลูกค้า")) == str(bill.get("รหัสลูกค้า"))),
+                (c for c in sheets.customers() if str(c.get("code")) == str(bill.get("customer_code"))),
                 {},
             )
             lines = bills.lines_for_bill(selected)
@@ -92,7 +92,7 @@ with tab_list:
                 try:
                     pdf_bytes = generate_bill_pdf(bill, cust, lines, total)
                     st.download_button(
-                        label=f"⬇️ ดาวน์โหลด บิล-{cust.get('ชื่อลูกค้า', '')}-{bill.get('วันที่', '').replace('/', '')}.pdf",
+                        label=f"⬇️ ดาวน์โหลด บิล-{cust.get('name', '')}-{bill.get('date', '').replace('/', '')}.pdf",
                         data=pdf_bytes,
                         file_name=f"bill-{selected}.pdf",
                         mime="application/pdf",
@@ -126,7 +126,7 @@ with tab_new:
         st.warning("ไม่มีลูกค้า/สินค้าที่ใช้งาน")
         st.stop()
 
-    cust_options = {f"{c['ชื่อลูกค้า']} ({c['รหัสลูกค้า']})": c for c in active_customers}
+    cust_options = {f"{c['name']} ({c['code']})": c for c in active_customers}
 
     col1, col2 = st.columns(2)
     with col1:
@@ -135,7 +135,7 @@ with tab_new:
     with col2:
         bill_date = st.date_input("วันที่", value=date.today(), format="DD/MM/YYYY", key="new_date")
 
-    price_set = selected_cust.get("ชุดราคา", "มาตรฐาน")
+    price_set = selected_cust.get("price_set", "มาตรฐาน")
     st.caption(f"ชุดราคา: **{price_set}**")
 
     # โหลด price map ครั้งเดียว
@@ -144,16 +144,16 @@ with tab_new:
     # สร้าง DataFrame ของสินค้าทั้งหมด + คำนวณ หน่วยละ + เริ่มต้น qty 0
     products_sorted = sorted(
         active_products,
-        key=lambda p: int(bills._to_float(p.get("ลำดับแสดง", 0))),
+        key=lambda p: int(bills._to_float(p.get("display_order", 0))),
     )
 
     grid_rows = []
     for p in products_sorted:
-        pg = str(p.get("กลุ่มราคา", ""))
+        pg = str(p.get("price_group", ""))
         unit = bills.unit_price(price_set, pg, prices)
         grid_rows.append({
-            "รหัส": str(p.get("รหัสสินค้า", "")),
-            "ชื่อสินค้า": str(p.get("ชื่อสินค้า", "")),
+            "รหัส": str(p.get("code", "")),
+            "ชื่อสินค้า": str(p.get("name", "")),
             "กลุ่ม": pg,
             "หน่วยละ": unit,
             "จำนวน": 0,
@@ -208,7 +208,7 @@ with tab_new:
             try:
                 with st.spinner("กำลังบันทึก..."):
                     new_id = bills.create_bill(
-                        customer_code=selected_cust["รหัสลูกค้า"],
+                        customer_code=selected_cust["code"],
                         bill_date=bill_date,
                         items_qty=items_qty,
                         note=note,

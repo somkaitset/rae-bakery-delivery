@@ -24,15 +24,15 @@ def test_positional_fidelity_and_first_match(fresh_db):
     sheets.append("customer", ["C003", "ค", "ศว.", "a3", "p3", True])
 
     rows = sheets.customers()
-    assert [r["รหัสลูกค้า"] for r in rows] == ["C001", "C002", "C003"]
-    # Appended values come back byte-identical under the right Thai keys.
+    assert [r["code"] for r in rows] == ["C001", "C002", "C003"]
+    # Appended values come back byte-identical under the right English keys.
     assert rows[1] == {
-        "รหัสลูกค้า": "C002", "ชื่อลูกค้า": "ข", "ชุดราคา": "มาตรฐาน",
-        "ที่อยู่": "a2", "เบอร์โทร": "p2", "ใช้งาน": "1",  # bool True -> TEXT "1"
+        "code": "C002", "name": "ข", "price_set": "มาตรฐาน",
+        "address": "a2", "phone": "p2", "active": "1",  # bool True -> TEXT "1"
     }
 
     # find_row_by_key returns the offset update_row consumes (idx+2).
-    idx = next(i for i, r in enumerate(rows) if r["รหัสลูกค้า"] == "C002")
+    idx = next(i for i, r in enumerate(rows) if r["code"] == "C002")
     row_number = idx + 2
     assert sheets.find_row_by_key("customer", "C002") == row_number
 
@@ -40,22 +40,22 @@ def test_positional_fidelity_and_first_match(fresh_db):
     sheets.update_row("customer", row_number,
                       ["C002", "ข-edited", "ศว.", "a2b", "p2b", False])
     rows2 = sheets.customers()
-    assert rows2[0]["ชื่อลูกค้า"] == "ก"      # untouched
-    assert rows2[2]["ชื่อลูกค้า"] == "ค"      # untouched
+    assert rows2[0]["name"] == "ก"      # untouched
+    assert rows2[2]["name"] == "ค"      # untouched
     assert rows2[1] == {
-        "รหัสลูกค้า": "C002", "ชื่อลูกค้า": "ข-edited", "ชุดราคา": "ศว.",
-        "ที่อยู่": "a2b", "เบอร์โทร": "p2b", "ใช้งาน": "0",  # bool False -> "0"
+        "code": "C002", "name": "ข-edited", "price_set": "ศว.",
+        "address": "a2b", "phone": "p2b", "active": "0",  # bool False -> "0"
     }
 
     # delete_row removes the right one and shifts addressing.
     sheets.delete_row("customer", row_number)
     rows3 = sheets.customers()
-    assert [r["รหัสลูกค้า"] for r in rows3] == ["C001", "C003"]
+    assert [r["code"] for r in rows3] == ["C001", "C003"]
 
     # DUPLICATE code -> find_row_by_key returns the FIRST match.
     sheets.append("customer", ["C001", "dup", "มาตรฐาน", "", "", True])
     dup_rows = sheets.customers()
-    assert [r["รหัสลูกค้า"] for r in dup_rows] == ["C001", "C003", "C001"]
+    assert [r["code"] for r in dup_rows] == ["C001", "C003", "C001"]
     # First C001 is at offset 0 -> row_number 2.
     assert sheets.find_row_by_key("customer", "C001") == 2
 
@@ -78,7 +78,7 @@ def test_delete_bill_isolation_surviving_items_byte_identical(fresh_db):
     # Snapshot the SURVIVING bill's items (full dicts) before deletion.
     surviving_before = [
         it for it in sheets.bill_items()
-        if it["รหัสใบส่ง"] == "D0002"
+        if it["bill_id"] == "D0002"
     ]
     assert len(surviving_before) == 2
 
@@ -87,12 +87,12 @@ def test_delete_bill_isolation_surviving_items_byte_identical(fresh_db):
 
     items_after = sheets.bill_items()
     # D0001 fully gone.
-    assert all(it["รหัสใบส่ง"] != "D0001" for it in items_after)
+    assert all(it["bill_id"] != "D0001" for it in items_after)
     # D0002 items are BYTE-IDENTICAL (full dict compare), not merely count==2.
-    surviving_after = [it for it in items_after if it["รหัสใบส่ง"] == "D0002"]
+    surviving_after = [it for it in items_after if it["bill_id"] == "D0002"]
     assert surviving_after == surviving_before
     # Bill header for D0002 also survives; D0001 header gone.
-    bill_ids = [b["รหัสใบส่ง"] for b in sheets.bills()]
+    bill_ids = [b["bill_id"] for b in sheets.bills()]
     assert bill_ids == ["D0002"]
 
 
@@ -115,20 +115,20 @@ def test_bill_lines_view_shape_and_sum(fresh_db):
     assert len(lines) == 2  # one row per price group
 
     for ln in lines:
-        # R3: รหัสใบส่ง present so lines_for_bill can filter on it.
-        assert "รหัสใบส่ง" in ln
-        assert ln["รหัสใบส่ง"] == bid
-        assert "กลุ่มราคา" in ln
-        # จำนวน is int-valued so pdf.py str(qty) renders "3" not "3.0".
-        assert isinstance(ln["จำนวน"], int)
-        assert str(ln["จำนวน"]) == str(int(ln["จำนวน"]))
+        # R3: bill_id present so lines_for_bill can filter on it.
+        assert "bill_id" in ln
+        assert ln["bill_id"] == bid
+        assert "price_group" in ln
+        # qty is int-valued so pdf.py str(qty) renders "3" not "3.0".
+        assert isinstance(ln["qty"], int)
+        assert str(ln["qty"]) == str(int(ln["qty"]))
 
     # R6: sum of line amounts equals bill_total (both qty>0).
-    assert sum(ln["จำนวนเงิน"] for ln in lines) == bills.bill_total(bid)
+    assert sum(ln["amount"] for ln in lines) == bills.bill_total(bid)
 
-    # sheets.bill_lines() returns the same Thai-keyed rows for this bill.
-    raw = [l for l in sheets.bill_lines() if l["รหัสใบส่ง"] == bid]
-    assert {l["กลุ่มราคา"] for l in raw} == {"15", "20"}
+    # sheets.bill_lines() returns the same English-keyed rows for this bill.
+    raw = [l for l in sheets.bill_lines() if l["bill_id"] == bid]
+    assert {l["price_group"] for l in raw} == {"15", "20"}
 
 
 def test_bill_lines_view_uses_max_on_dirty_duplicate_price(fresh_db):
@@ -139,10 +139,10 @@ def test_bill_lines_view_uses_max_on_dirty_duplicate_price(fresh_db):
     lines = bills.lines_for_bill("D0001")
     assert len(lines) == 1
     ln = lines[0]
-    # R4: MAX(หน่วยละ) -> 99.0, no crash; qty SUM=5, amount SUM=234.
-    assert ln["หน่วยละ"] == 99.0
-    assert ln["จำนวน"] == 5
-    assert ln["จำนวนเงิน"] == 234.0
+    # R4: MAX(unit_price) -> 99.0, no crash; qty SUM=5, amount SUM=234.
+    assert ln["unit_price"] == 99.0
+    assert ln["qty"] == 5
+    assert ln["amount"] == 234.0
 
 
 # --- AC8 active filter ------------------------------------------------------
@@ -156,7 +156,7 @@ def test_active_customers_tolerant_filter(fresh_db):
     sheets.append("customer", ["C004", "zero", "s", "", "", "0"])
     sheets.append("customer", ["C005", "false", "s", "", "", "FALSE"])
 
-    active_codes = {c["รหัสลูกค้า"] for c in sheets.active_customers()}
+    active_codes = {c["code"] for c in sheets.active_customers()}
     assert active_codes == {"C001", "C002", "C003"}
     assert "C004" not in active_codes
     assert "C005" not in active_codes
@@ -167,7 +167,7 @@ def test_active_products_tolerant_filter(fresh_db):
     sheets.append("product", ["P101", "a", "15", "", "1", "TRUE"])
     sheets.append("product", ["P102", "b", "15", "", "2", "FALSE"])
     sheets.append("product", ["P103", "c", "15", "", "3", True])
-    active_codes = {p["รหัสสินค้า"] for p in sheets.active_products()}
+    active_codes = {p["code"] for p in sheets.active_products()}
     assert active_codes == {"P101", "P103"}
 
 
@@ -206,7 +206,7 @@ def test_read_after_write_returns_fresh_data(fresh_db):
     assert sheets.customers() == []
     sheets.append("customer", ["C001", "fresh", "s", "", "", True])
     rows = sheets.customers()
-    assert len(rows) == 1 and rows[0]["ชื่อลูกค้า"] == "fresh"
+    assert len(rows) == 1 and rows[0]["name"] == "fresh"
 
 
 # --- AC10 concurrency -------------------------------------------------------
@@ -265,6 +265,6 @@ def test_append_short_row_pads_with_empty_string(fresh_db):
     sheets.append("customer", ["C001", "n"])  # 2 of 6 columns
     row = sheets.customers()[0]
     assert row == {
-        "รหัสลูกค้า": "C001", "ชื่อลูกค้า": "n", "ชุดราคา": "",
-        "ที่อยู่": "", "เบอร์โทร": "", "ใช้งาน": "",
+        "code": "C001", "name": "n", "price_set": "",
+        "address": "", "phone": "", "active": "",
     }

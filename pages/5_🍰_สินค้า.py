@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 import streamlit as st
 
-from lib import bills, sheets, storage
+from lib import bills, labels, sheets, storage
 from lib.auth import require_auth
 
 require_auth()
@@ -38,7 +38,7 @@ def _normalize_active(v):
 
 def _sort_key(p):
     """เรียงตามกลุ่มราคา (ตัวเลข) แล้วตามด้วยรหัสสินค้า."""
-    return (int(bills._to_float(p.get("กลุ่มราคา", 0))), str(p.get("รหัสสินค้า", "")))
+    return (int(bills._to_float(p.get("price_group", 0))), str(p.get("code", "")))
 
 
 def _go_edit(code: str) -> None:
@@ -68,7 +68,7 @@ def render_gallery() -> None:
         return
 
     active_only = st.toggle("แสดงเฉพาะที่ใช้งาน", value=True, key="gal_active")
-    ps = [p for p in ps if (not active_only) or _normalize_active(p.get("ใช้งาน"))]
+    ps = [p for p in ps if (not active_only) or _normalize_active(p.get("active"))]
     ps.sort(key=_sort_key)
     st.caption("เรียงตามกลุ่มราคา → รหัสสินค้า • คลิก **✏️ แก้ไข** ใต้รูปเพื่อแก้สินค้านั้น")
 
@@ -76,9 +76,9 @@ def render_gallery() -> None:
     for i in range(0, len(ps), cols_per_row):
         cols = st.columns(cols_per_row)
         for j, p in enumerate(ps[i:i + cols_per_row]):
-            code = str(p.get("รหัสสินค้า", ""))
+            code = str(p.get("code", ""))
             with cols[j]:
-                img = storage.image_src(p.get("รูปสินค้า"))
+                img = storage.image_src(p.get("image"))
                 if img:
                     try:
                         st.image(img, use_container_width=True)
@@ -99,8 +99,8 @@ def render_gallery() -> None:
                     args=(code,),
                 )
                 st.markdown(
-                    f"**{p.get('ชื่อสินค้า', '')}**  \n"
-                    f"`{code}` • กลุ่ม {p.get('กลุ่มราคา', '')}"
+                    f"**{p.get('name', '')}**  \n"
+                    f"`{code}` • กลุ่ม {p.get('price_group', '')}"
                 )
 
 
@@ -114,10 +114,11 @@ def render_table() -> None:
         st.info("ยังไม่มีสินค้า")
         return
     df = pd.DataFrame(sorted(ps, key=_sort_key))
-    if "ใช้งาน" in df.columns:
-        df["ใช้งาน"] = df["ใช้งาน"].apply(_normalize_active)
-    st.dataframe(df, use_container_width=True, hide_index=True)
-    active_n = sum(_normalize_active(p.get("ใช้งาน")) for p in ps)
+    if "active" in df.columns:
+        df["active"] = df["active"].apply(_normalize_active)
+    df_display = df.rename(columns=labels.thai_columns("product"))
+    st.dataframe(df_display, use_container_width=True, hide_index=True)
+    active_n = sum(_normalize_active(p.get("active")) for p in ps)
     st.caption(f"รวม **{len(ps)}** รายการ ({active_n} ใช้งาน)")
 
 
@@ -181,7 +182,7 @@ def render_edit(code: str) -> None:
         st.error(f"อ่านข้อมูลไม่ได้: {e}")
         return
 
-    target = next((p for p in ps if str(p.get("รหัสสินค้า", "")) == code), None)
+    target = next((p for p in ps if str(p.get("code", "")) == code), None)
     if target is None:
         st.error(f"ไม่พบสินค้า `{code}` (อาจถูกลบไปแล้ว) — กดกลับแกลเลอรี่")
         return
@@ -193,15 +194,15 @@ def render_edit(code: str) -> None:
 
     st.subheader(f"แก้ไขสินค้า `{code}`")
 
-    current_img = str(target.get("รูปสินค้า", "") or "")
+    current_img = str(target.get("image", "") or "")
     current_src = storage.image_src(current_img)
     if current_src:
         st.image(current_src, width=150, caption="รูปปัจจุบัน")
 
     with st.form("edit_product_form"):
         st.text_input("รหัส", value=code, disabled=True)
-        name = st.text_input("ชื่อสินค้า *", value=str(target.get("ชื่อสินค้า", "")))
-        current_pg = str(target.get("กลุ่มราคา", "10"))
+        name = st.text_input("ชื่อสินค้า *", value=str(target.get("name", "")))
+        current_pg = str(target.get("price_group", "10"))
         price_group = st.selectbox(
             "กลุ่มราคา *",
             options=PRICE_GROUPS,
@@ -209,9 +210,9 @@ def render_edit(code: str) -> None:
         )
         display_order = st.number_input(
             "ลำดับแสดง", min_value=0, max_value=999,
-            value=int(bills._to_float(target.get("ลำดับแสดง", 0))),
+            value=int(bills._to_float(target.get("display_order", 0))),
         )
-        active = st.checkbox("ใช้งาน", value=_normalize_active(target.get("ใช้งาน")))
+        active = st.checkbox("ใช้งาน", value=_normalize_active(target.get("active")))
 
         uploaded = st.file_uploader(
             "เปลี่ยนรูป (เว้นว่าง = ใช้รูปเดิม)",

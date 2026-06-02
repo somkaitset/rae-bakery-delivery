@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 import streamlit as st
 
-from lib import bills, sheets
+from lib import bills, labels, sheets
 from lib.auth import require_auth
 
 require_auth()
@@ -37,14 +37,15 @@ with tab_list:
         st.info("ยังไม่มีลูกค้า")
     else:
         df = pd.DataFrame(cs)
-        # normalize ใช้งาน column to bool
-        if "ใช้งาน" in df.columns:
-            df["ใช้งาน"] = df["ใช้งาน"].apply(
+        # normalize active column to bool
+        if "active" in df.columns:
+            df["active"] = df["active"].apply(
                 lambda v: bool(v) if isinstance(v, bool) else str(v).upper() in ("TRUE", "1")
             )
-        df = df.sort_values(["ใช้งาน", "ชื่อลูกค้า"], ascending=[False, True]).reset_index(drop=True)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        st.caption(f"รวม **{len(cs)}** ราย ({int(df['ใช้งาน'].sum())} ใช้งาน)")
+        df = df.sort_values(["active", "name"], ascending=[False, True]).reset_index(drop=True)
+        df_display = df.rename(columns=labels.thai_columns("customer"))
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        st.caption(f"รวม **{len(cs)}** ราย ({int(df['active'].sum())} ใช้งาน)")
 
 
 # --- Add ---
@@ -81,23 +82,23 @@ with tab_edit:
     if not cs:
         st.info("ยังไม่มีลูกค้า")
     else:
-        labels = {f"{c['รหัสลูกค้า']} — {c['ชื่อลูกค้า']}": (i, c) for i, c in enumerate(cs)}
-        choice = st.selectbox("เลือกลูกค้า", options=list(labels.keys()), key="edit_cust")
-        idx, target = labels[choice]
+        options = {f"{c['code']} — {c['name']}": (i, c) for i, c in enumerate(cs)}
+        choice = st.selectbox("เลือกลูกค้า", options=list(options.keys()), key="edit_cust")
+        idx, target = options[choice]
         row_number = idx + 2  # row 1 = header
 
         with st.form("edit_customer_form"):
-            code = st.text_input("รหัส", value=target.get("รหัสลูกค้า", ""), disabled=True)
-            name = st.text_input("ชื่อลูกค้า *", value=str(target.get("ชื่อลูกค้า", "")))
-            current_ps = str(target.get("ชุดราคา", "มาตรฐาน"))
+            code = st.text_input("รหัส", value=target.get("code", ""), disabled=True)
+            name = st.text_input("ชื่อลูกค้า *", value=str(target.get("name", "")))
+            current_ps = str(target.get("price_set", "มาตรฐาน"))
             price_set = st.selectbox(
                 "ชุดราคา *",
                 options=PRICE_SETS,
                 index=PRICE_SETS.index(current_ps) if current_ps in PRICE_SETS else 0,
             )
-            address = st.text_area("ที่อยู่", value=str(target.get("ที่อยู่", "")), height=80)
-            phone = st.text_input("เบอร์โทร", value=str(target.get("เบอร์โทร", "")))
-            current_active = str(target.get("ใช้งาน", "TRUE")).upper() in ("TRUE", "1")
+            address = st.text_area("ที่อยู่", value=str(target.get("address", "")), height=80)
+            phone = st.text_input("เบอร์โทร", value=str(target.get("phone", "")))
+            current_active = str(target.get("active", "TRUE")).upper() in ("TRUE", "1")
             active = st.checkbox("ใช้งาน", value=current_active)
             submitted = st.form_submit_button("💾 บันทึก", type="primary", use_container_width=True)
             if submitted:

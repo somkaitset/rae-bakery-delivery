@@ -185,15 +185,15 @@ def test_migration_preserves_app_visible_types(tmp_path):
 
     bill_rows = _read_tab(db_file, "bill")
     # d/m/yyyy text date survives verbatim and parses app-side.
-    assert bill_rows[0]["วันที่"] == "21/5/2026"
-    assert bills.parse_date(bill_rows[0]["วันที่"]).isoformat() == "2026-05-21"
+    assert bill_rows[0]["date"] == "21/5/2026"
+    assert bills.parse_date(bill_rows[0]["date"]).isoformat() == "2026-05-21"
 
     # active "TRUE" passes the tolerant filter; "FALSE" does not.
     customers = _read_tab(db_file, "customer")
     actives = [c for c in customers
-               if c.get("ใช้งาน") in (True, "TRUE", "true", 1, "1")]
-    assert {c["รหัสลูกค้า"] for c in actives} == {"C001"}
+               if c.get("active") in (True, "TRUE", "true", 1, "1")]
+    assert {c["code"] for c in actives} == {"C001"}
 
-    # The spaced "รูปจาก LINE" header round-trips intact.
+    # The spaced "รูปจาก LINE" source header maps to English "image" in the DB.
     stocks = _read_tab(db_file, "stock")
-    assert stocks[0]["รูปจาก LINE"] == "line_photo.jpg"
+    assert stocks[0]["image"] == "line_photo.jpg"
