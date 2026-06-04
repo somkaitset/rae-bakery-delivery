@@ -137,6 +137,25 @@ def append_many(conn: sqlite3.Connection, tab_key: str, rows: list[list[Any]]) -
     conn.commit()
 
 
+def replace_bill_items(conn: sqlite3.Connection, rows: list[list[Any]], bill_id: str) -> None:
+    """Atomic replace of one bill's item rows: DELETE all bill_item rows for
+    bill_id, then INSERT `rows`, in a SINGLE transaction (one commit).
+
+    A single connection means an interrupted call rolls back the DELETE+INSERT
+    together — no partial/zero-item window. `rows` may be empty (clears the
+    bill's items). Column order follows schema.COLUMNS["bill_item"].
+    """
+    conn.execute('DELETE FROM "bill_item" WHERE "bill_id"=?', [bill_id])
+    if rows:
+        cols = ", ".join(f'"{eng}"' for eng in schema.english_columns("bill_item"))
+        qs = ", ".join("?" for _ in schema.COLUMNS["bill_item"])
+        conn.executemany(
+            f'INSERT INTO "bill_item" ({cols}) VALUES ({qs})',
+            [_fit_row("bill_item", r) for r in rows],
+        )
+    conn.commit()
+
+
 def update_row(conn: sqlite3.Connection, tab_key: str, row_number: int, row: list[Any]) -> None:
     target = _id_for_row_number(conn, tab_key, row_number)
     if target is None:

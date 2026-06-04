@@ -41,6 +41,13 @@ def append_many(tab_key: str, rows: list[list[Any]]) -> None:
     _invalidate()
 
 
+def replace_bill_items(rows: list[list[Any]], bill_id: str) -> None:
+    """แทนที่รายการสินค้าของบิลนี้ทั้งหมดใน 1 transaction (DELETE WHERE bill_id + INSERT)."""
+    with closing(db.ensure_db()) as conn:
+        db.replace_bill_items(conn, rows, bill_id)
+    _invalidate()
+
+
 def update_row(tab_key: str, row_number: int, row: list[Any]) -> None:
     """อัปเดตทั้งแถว (row_number = 1-indexed sheet row; header=1, แถวข้อมูลแรก=2)."""
     with closing(db.ensure_db()) as conn:
