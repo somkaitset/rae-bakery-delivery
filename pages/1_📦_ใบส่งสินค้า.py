@@ -309,6 +309,7 @@ with tab_list:
                 if st.button("🗑️ ลบ", type="secondary", disabled=not confirm, key="del_btn"):
                     with st.spinner("กำลังลบ..."):
                         n = bills.delete_bill(sel_bill_id)
+                        pdf_archive.delete_pdf(sel_bill_id)  # ลบ PDF archive ด้วย กัน ID ถูก reuse แล้วพิมพ์ไฟล์เก่า
                     st.session_state.pop("sel_bill_id", None)
                     st.success(f"ลบใบ {sel_bill_id} เรียบร้อย (ลบ {n} แถว)")
                     st.rerun()
