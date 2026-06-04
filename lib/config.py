@@ -47,11 +47,6 @@ DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "data" / "app.db")))
 # เช่น BILLS_PDF_DIR=/mnt/data/rae-bakery/bills_pdf
 BILLS_PDF_DIR = Path(os.getenv("BILLS_PDF_DIR", str(BASE_DIR / "data" / "bills_pdf")))
 
-# --- Data cache ---
-# อายุ cache ข้อมูลที่อ่านจาก Google Sheets (วินาที) — ลดการยิง API ทุก rerun
-# จะถูกเคลียร์ทันทีเมื่อมีการเขียน (เพิ่ม/แก้/ลบ) อยู่แล้ว
-SHEETS_CACHE_TTL = int(os.getenv("SHEETS_CACHE_TTL", "60"))
-
 # --- Auth ---
 AUTH_CONFIG_PATH = os.getenv("AUTH_CONFIG_PATH", str(BASE_DIR / "auth_config.yaml"))
 COOKIE_NAME = os.getenv("COOKIE_NAME", "rae_bakery_auth")
