@@ -54,7 +54,7 @@ Layered design:
 
 ## Config & secrets (all git-ignored)
 
-`.env` (see `.env.example`), `auth_config.yaml` (see `.example`), `secrets/service_account.json`, and the Thai PDF fonts `secrets/Sarabun-Regular.ttf` + `Sarabun-Bold.ttf` (without them, PDF Thai text renders as boxes — `lib/pdf.py` falls back to Helvetica). `data/` (local images) and `certs/` (self-signed TLS) are also ignored.
+`.env` (see `.env.example`), `auth_config.yaml` (see `.example`), `secrets/service_account.json`, and the Thai PDF fonts `secrets/Sarabun-Regular.ttf` + `Sarabun-Bold.ttf` (without them, PDF Thai text renders as boxes — `lib/pdf.py` falls back to Helvetica). The bill template also uses two **optional** decorative fonts to match the old Google Sheet print — `secrets/Charmonman-Regular.ttf` (shop name) + `secrets/ChakraPetch-Regular.ttf`/`ChakraPetch-SemiBold.ttf` (headings); `lib/pdf.py::_register_fonts` falls back to Sarabun when they are absent, so deploys without them still render (just without the script look). See `secrets/README.md` for download commands. `data/` (local images) and `certs/` (self-signed TLS) are also ignored.
 
 ## Deployment notes
 

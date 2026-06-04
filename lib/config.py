@@ -41,6 +41,12 @@ IMAGE_JPEG_QUALITY = int(os.getenv("IMAGE_JPEG_QUALITY", "85"))
 # เช่น DB_PATH=/mnt/data/rae-bakery/app.db (WAL ต้องการ local fs — ห้าม NFS/CIFS)
 DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "data" / "app.db")))
 
+# --- PDF archive storage ---
+# โฟลเดอร์เก็บไฟล์ PDF บิลที่พิมพ์แล้ว (1 ไฟล์ต่อบิล: {bill_id}.pdf — ดู lib/pdf_archive.py)
+# บน Proxmox ให้ตั้ง env BILLS_PDF_DIR ชี้ไป volume ถาวรที่ Proxmox backup ครอบไว้
+# เช่น BILLS_PDF_DIR=/mnt/data/rae-bakery/bills_pdf
+BILLS_PDF_DIR = Path(os.getenv("BILLS_PDF_DIR", str(BASE_DIR / "data" / "bills_pdf")))
+
 # --- Data cache ---
 # อายุ cache ข้อมูลที่อ่านจาก Google Sheets (วินาที) — ลดการยิง API ทุก rerun
 # จะถูกเคลียร์ทันทีเมื่อมีการเขียน (เพิ่ม/แก้/ลบ) อยู่แล้ว
