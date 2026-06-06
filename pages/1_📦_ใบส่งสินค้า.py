@@ -321,6 +321,13 @@ with tab_list:
 # Tab: สร้างใบใหม่ (กริดสินค้าทั้งหมด)
 # =====================================================
 with tab_new:
+    # Flash carried across the post-save st.rerun() that clears the form.
+    flash = st.session_state.pop("new_bill_flash", None)
+    if flash:
+        st.success(flash)
+        st.balloons()
+        st.info("ไปแท็บ \"📋 รายการใบส่ง\" → คลิกใบที่เพิ่งสร้าง → กด \"พิมพ์บิล\"")
+
     try:
         active_customers = sheets.active_customers()
         active_products = sheets.active_products()
@@ -334,21 +341,25 @@ with tab_new:
 
     cust_options = {f"{c['name']} ({c['code']})": c for c in active_customers}
 
+    # Bumping this nonce gives every create-form widget a fresh key, which is the
+    # reliable way to reset st.data_editor — popping its key does not clear it.
+    nonce = st.session_state.get("new_form_nonce", 0)
+
     col1, col2 = st.columns(2)
     with col1:
-        cust_label = st.selectbox("ลูกค้า", options=list(cust_options.keys()), key="new_cust")
+        cust_label = st.selectbox("ลูกค้า", options=list(cust_options.keys()), key=f"new_cust_{nonce}")
         selected_cust = cust_options[cust_label]
     with col2:
-        bill_date = st.date_input("วันที่", value=date.today(), format="DD/MM/YYYY", key="new_date")
+        bill_date = st.date_input("วันที่", value=date.today(), format="DD/MM/YYYY", key=f"new_date_{nonce}")
 
     price_set = selected_cust.get("price_set", "มาตรฐาน")
     st.caption(f"ชุดราคา: **{price_set}**")
 
     prices = bills.price_map()
 
-    items_qty, amt_sum = _bill_grid(active_products, price_set, prices, key="new_grid")
+    items_qty, amt_sum = _bill_grid(active_products, price_set, prices, key=f"new_grid_{nonce}")
 
-    note = st.text_input("หมายเหตุ (ทางเลือก)", key="new_note")
+    note = st.text_input("หมายเหตุ (ทางเลือก)", key=f"new_note_{nonce}")
 
     col_save, col_save_send = st.columns(2)
     save_draft = col_save.button("💾 บันทึก (สถานะ: ร่าง)", use_container_width=True)
@@ -371,8 +382,15 @@ with tab_new:
                         note=note,
                         status="ส่งแล้ว" if save_send else "ร่าง",
                     )
-                st.success(f"🎉 สร้างใบ `{new_id}` เรียบร้อย ({len(items_qty)} ชนิด, รวม {amt_sum:,.2f} บาท)")
-                st.balloons()
-                st.info("ไปแท็บ \"รายการใบส่ง\" → คลิกแถวใบที่เพิ่งสร้าง → กด \"พิมพ์บิล\"")
+                # Stash the success message, then bump the form nonce so every
+                # create-form widget (qty grid, customer, date, note) re-mounts
+                # with a fresh key and resets to blank on the next run.
+                st.session_state["new_bill_flash"] = (
+                    f"🎉 สร้างใบ {new_id} เรียบร้อย "
+                    f"({len(items_qty)} ชนิด, รวม {amt_sum:,.2f} บาท) — "
+                    "ล้างฟอร์มแล้ว พร้อมทำใบใหม่"
+                )
+                st.session_state["new_form_nonce"] = nonce + 1
+                st.rerun()
             except Exception as e:
                 st.error(f"บันทึกไม่ได้: {e}")
