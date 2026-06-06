@@ -326,30 +326,10 @@ def revert_to_draft(bill_id: str) -> None:
 
 def delete_bill(bill_id: str) -> int:
     """
-    ลบ bill + items ทั้งหมดของ bill_id นี้
-    คืนจำนวนแถวที่ลบ
+    ลบ bill + items ทั้งหมดของ bill_id นี้ (atomic, ใน 1 transaction)
+    คืนจำนวนแถวที่ลบ (items + ตัวบิล)
     """
-    deleted = 0
-
-    # delete items (reverse order to preserve row numbers)
-    items = sheets.bill_items()
-    item_rows = [
-        i + 2  # row 1 = header, +2 because enumerate starts 0
-        for i, it in enumerate(items)
-        if str(it.get("bill_id", "")) == bill_id
-    ]
-    for row_num in sorted(item_rows, reverse=True):
-        sheets.delete_row("bill_item", row_num)
-        deleted += 1
-
-    # delete bill
-    bills_data = sheets.bills()
-    for i, b in enumerate(bills_data):
-        if str(b.get("bill_id", "")) == bill_id:
-            sheets.delete_row("bill", i + 2)
-            deleted += 1
-            break
-
+    deleted = sheets.delete_bill(bill_id)
     sheets.clear_caches()
     return deleted
 

@@ -156,6 +156,20 @@ def replace_bill_items(conn: sqlite3.Connection, rows: list[list[Any]], bill_id:
     conn.commit()
 
 
+def delete_bill(conn: sqlite3.Connection, bill_id: str) -> int:
+    """Atomic delete of a bill and all its item rows in a SINGLE transaction.
+
+    DELETE the bill_item rows WHERE bill_id, then the bill row WHERE bill_id,
+    in one commit. Keyed by bill_id (not row_number), so it never depends on row
+    ordering. Returns the total rows deleted (items + the bill row; 0 if no such
+    bill).
+    """
+    n = conn.execute('DELETE FROM "bill_item" WHERE "bill_id"=?', [bill_id]).rowcount
+    n += conn.execute('DELETE FROM "bill" WHERE "bill_id"=?', [bill_id]).rowcount
+    conn.commit()
+    return n
+
+
 def update_row(conn: sqlite3.Connection, tab_key: str, row_number: int, row: list[Any]) -> None:
     target = _id_for_row_number(conn, tab_key, row_number)
     if target is None:

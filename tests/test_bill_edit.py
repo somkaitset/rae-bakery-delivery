@@ -251,3 +251,56 @@ def test_replace_bill_items_primitive_single_set(fresh_db):
     assert b1[0]["item_id"] == "I0010"
     # Other bill untouched.
     assert len(_items_for("D0002")) == 1
+
+
+# --- delete_bill cascade (atomic, keyed by bill_id) ------------------------
+
+def test_delete_bill_removes_bill_and_all_items(fresh_db):
+    fresh_db()
+    sheets.append("bill", ["D0001", "1/1/2026", "C001", "", "ร่าง"])
+    sheets.append("bill", ["D0002", "1/1/2026", "C001", "", "ร่าง"])
+    sheets.append_many("bill_item", [
+        ["I0001", "D0001", "P301", "3", "15", "12", "36"],
+        ["I0002", "D0001", "P302", "2", "15", "12", "24"],
+        ["I0003", "D0002", "P101", "9", "10", "8", "72"],
+    ])
+
+    n = bills.delete_bill("D0001")
+
+    # 2 items + 1 bill row deleted.
+    assert n == 3
+    assert [b["bill_id"] for b in sheets.bills()] == ["D0002"]
+    assert _items_for("D0001") == []
+    # The other bill and its item are untouched.
+    assert len(_items_for("D0002")) == 1
+
+
+def test_delete_bill_only_targets_matching_bill_id(fresh_db):
+    fresh_db()
+    # Interleave items across two bills so a row-position scheme would be fragile;
+    # DELETE WHERE bill_id must remove exactly D0001's rows regardless of order.
+    sheets.append("bill", ["D0001", "1/1/2026", "C001", "", "ร่าง"])
+    sheets.append("bill", ["D0002", "1/1/2026", "C001", "", "ร่าง"])
+    sheets.append_many("bill_item", [
+        ["I0001", "D0002", "P101", "1", "10", "8", "8"],
+        ["I0002", "D0001", "P301", "3", "15", "12", "36"],
+        ["I0003", "D0002", "P302", "2", "15", "12", "24"],
+        ["I0004", "D0001", "P401", "1", "20", "15", "15"],
+    ])
+
+    n = bills.delete_bill("D0001")
+
+    assert n == 3  # I0002 + I0004 + the D0001 bill row
+    remaining = sorted(it["item_id"] for it in sheets.bill_items())
+    assert remaining == ["I0001", "I0003"]  # only D0002's items survive
+    assert [b["bill_id"] for b in sheets.bills()] == ["D0002"]
+
+
+def test_delete_bill_missing_returns_zero(fresh_db):
+    fresh_db()
+    sheets.append("bill", ["D0001", "1/1/2026", "C001", "", "ร่าง"])
+
+    n = bills.delete_bill("D9999")
+
+    assert n == 0
+    assert len(sheets.bills()) == 1
