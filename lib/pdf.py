@@ -29,6 +29,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
+    HRFlowable,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -368,5 +369,354 @@ def render_bill_html(
     </tbody>
   </table>
   <div class="sig"><span>ผู้รับของ_____________</span><span>ผู้ส่งของ_____________</span></div>
+</body>
+</html>"""
+
+
+# ===========================================================================
+# Billing documents (ใบวางบิล): ใบแจ้งหนี้ (invoice) + ใบเสร็จรับเงิน (receipt)
+# ---------------------------------------------------------------------------
+# Separate A5 layout from the delivery-bill renderer above (do NOT overload it):
+# a "ส่งถึง" header block + one table row per delivery day + a kind-specific
+# footer (bank block for the invoice, payment-method checkboxes for the receipt).
+# Amounts are passed in already aggregated (see lib/billing.day_lines).
+# ===========================================================================
+
+DOC_TITLES = {"invoice": "ใบแจ้งหนี้", "receipt": "ใบเสร็จรับเงิน"}
+NUMBER_LABELS = {"invoice": "เลขที่ใบแจ้งหนี้", "receipt": "เลขที่ใบเสร็จ"}
+
+
+def fmt_baht(value, blank_zero: bool = False) -> str:
+    """ค่า → จำนวนเงินมีคอมมาคั่นหลัก ไม่มีทศนิยม ไม่มี 'บาท' (เช่น 5451 → '5,451').
+
+    blank_zero=True: 0 / ว่าง / ไม่ใช่ตัวเลข → "" (ใช้กับช่องในตาราง).
+    """
+    try:
+        n = round(float(value))
+    except (TypeError, ValueError):
+        return "" if blank_zero else "0"
+    if blank_zero and n == 0:
+        return ""
+    return f"{n:,}"
+
+
+def _billing_table_data(lines: list[dict], total) -> list[list[str]]:
+    """table_data (header + 1 แถว/วัน + แถวรวม) จาก day_lines.
+    seam ที่ test ใช้ตรวจค่าใน PDF (ลำดับที่, วันที่, จำนวนเงิน)."""
+    data: list[list[str]] = [["ลำดับที่", "รายละเอียด", "จำนวนเงิน"]]
+    for i, ln in enumerate(lines, 1):
+        data.append([str(i), str(ln.get("date_str", "")), fmt_baht(ln.get("amount", 0))])
+    data.append(["", "รวมทั้งสิ้น", fmt_baht(total)])
+    return data
+
+
+def generate_billing_pdf(
+    kind: str,
+    shop: dict,
+    customer: dict,
+    doc: dict,
+    lines: list[dict],
+    total: float,
+) -> bytes:
+    """
+    สร้าง PDF ใบวางบิล (A5) — ใช้ร่วมกันทั้งใบแจ้งหนี้/ใบเสร็จ ต่างกันที่หัวเรื่อง,
+    ช่องเลขที่ และ footer.
+
+    Args:
+        kind: "invoice" หรือ "receipt"
+        shop: dict ข้อมูลร้าน (name, address, tax_id, signatory, bank{...}) จาก billing_config
+        customer: dict ข้อมูลลูกค้าสำหรับช่อง "ส่งถึง"
+                  (company_name, billing_address, tax_id, branch) จาก billing_config
+        doc: dict เมตาของเอกสาร — number, date; (receipt:) invoice_ref, payment_method
+        lines: list ของ {date_str, amount} (จาก billing.day_lines)
+        total: ยอดรวมทั้งสิ้น
+
+    Returns:
+        PDF เป็น bytes
+    """
+    fonts = _register_fonts()
+    bank = shop.get("bank") or {}
+
+    buf = BytesIO()
+    doc_tpl = SimpleDocTemplate(
+        buf,
+        pagesize=A5,
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+        title=f"{DOC_TITLES.get(kind, '')} {doc.get('number', '')}",
+    )
+
+    shop_name_st = ParagraphStyle(
+        "b_shop", fontName=fonts["title"], fontSize=22, leading=30
+    )
+    small_st = ParagraphStyle("b_small", fontName=fonts["body"], fontSize=8.5, leading=12)
+    title_st = ParagraphStyle(
+        "b_title", fontName=fonts["bold"], fontSize=20, leading=24, alignment=2
+    )
+    label_st = ParagraphStyle("b_label", fontName=fonts["bold"], fontSize=11, leading=15)
+    body_st = ParagraphStyle("b_body", fontName=fonts["body"], fontSize=10, leading=15)
+    meta_label_st = ParagraphStyle("b_ml", fontName=fonts["body"], fontSize=9, leading=13)
+    meta_val_st = ParagraphStyle(
+        "b_mv", fontName=fonts["bold"], fontSize=9, leading=13, alignment=2
+    )
+    sig_st = ParagraphStyle(
+        "b_sig", fontName=fonts["body"], fontSize=10, leading=15, alignment=1
+    )
+
+    # --- Header: shop block (left) + document title (right) ---
+    shop_block = [
+        Paragraph(escape(str(shop.get("name", "") or SHOP_NAME)), shop_name_st),
+        Paragraph(escape(str(shop.get("address", "") or "")), small_st),
+        Paragraph("เลขที่ผู้เสียภาษี : " + escape(str(shop.get("tax_id", "") or "")), small_st),
+    ]
+    header = Table(
+        [[shop_block, Paragraph(DOC_TITLES.get(kind, ""), title_st)]],
+        colWidths=[78 * mm, 46 * mm],
+    )
+    header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    # --- "ส่งถึง" block: customer details (left) + document meta (right) ---
+    sendto_left = [
+        Paragraph("ชื่อบริษัท: " + escape(str(customer.get("company_name", "") or "")), body_st),
+        Paragraph("ที่อยู่: " + escape(str(customer.get("billing_address", "") or "")), body_st),
+        Paragraph("เลขประจำตัวผู้เสียภาษี : " + escape(str(customer.get("tax_id", "") or "")), body_st),
+        Paragraph("สาขา : " + escape(str(customer.get("branch", "") or "")), body_st),
+    ]
+    meta_rows = [
+        [Paragraph(NUMBER_LABELS.get(kind, "เลขที่"), meta_label_st),
+         Paragraph(escape(str(doc.get("number", "") or "")), meta_val_st)],
+        [Paragraph("วันที่", meta_label_st),
+         Paragraph(escape(str(doc.get("date", "") or "")), meta_val_st)],
+    ]
+    if kind == "receipt":
+        meta_rows.append([
+            Paragraph("อ้างถึงใบแจ้งหนี้", meta_label_st),
+            Paragraph(escape(str(doc.get("invoice_ref", "") or "")), meta_val_st),
+        ])
+    meta_tbl = Table(meta_rows, colWidths=[25 * mm, 25 * mm])
+    meta_tbl.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    sendto = Table([[sendto_left, meta_tbl]], colWidths=[74 * mm, 50 * mm])
+    sendto.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    # --- Line-items table: one row per delivery day + grand-total row ---
+    table_data = _billing_table_data(lines, total)
+    n = len(table_data) - 1  # grand-total row index (last)
+    grey = colors.HexColor(0xCCCCCC)
+    items = Table(table_data, colWidths=[20 * mm, 74 * mm, 30 * mm])
+    items.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), fonts["head"]),     # header
+        ("FONTNAME", (0, 1), (-1, n - 1), fonts["body"]),  # body
+        ("FONTNAME", (0, n), (-1, n), fonts["bold"]),      # total row
+        ("FONTSIZE", (0, 0), (-1, -1), 11),
+        ("FONTSIZE", (0, 0), (-1, 0), 12),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),              # header centered
+        ("ALIGN", (0, 1), (0, n), "CENTER"),               # ลำดับที่
+        ("ALIGN", (1, 1), (1, n - 1), "LEFT"),             # รายละเอียด (day rows)
+        ("ALIGN", (2, 1), (2, -1), "RIGHT"),               # จำนวนเงิน
+        ("ALIGN", (1, n), (1, n), "RIGHT"),                # "รวมทั้งสิ้น" label
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 0), (-1, 0), grey),
+        ("BACKGROUND", (0, n), (-1, n), grey),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+
+    # --- Footer: bank block (invoice) / payment checkboxes (receipt) + signature ---
+    if kind == "invoice":
+        footer_left = [
+            Paragraph("หมายเหตุ: กรุณาชำระเงินโดยโอนเข้าบัญชี", body_st),
+            Paragraph("ชื่อบัญชี " + escape(str(bank.get("account_name", "") or "")), body_st),
+            Paragraph(escape(str(bank.get("bank_name", "") or "")), body_st),
+            Paragraph("เลขที่บัญชี " + escape(str(bank.get("account_no", "") or "")), body_st),
+        ]
+        sig_caption = escape(str(shop.get("name", "") or SHOP_NAME))
+    else:
+        method = str(doc.get("payment_method", "") or "")
+        def _chk(m: str) -> str:
+            return f"[{'X' if method == m else ' '}] {m}"
+        footer_left = [
+            Paragraph("รับชำระเงิน", body_st),
+            Paragraph(_chk("เงินสด"), body_st),
+            Paragraph(_chk("โอนเข้าบัญชีธนาคาร"), body_st),
+        ]
+        sig_caption = "ผู้รับเงิน"
+
+    footer_right = [
+        Paragraph(sig_caption, sig_st),
+        Spacer(1, 20),
+        Paragraph("____________________", sig_st),
+        Paragraph(escape(str(shop.get("signatory", "") or "")), sig_st),
+    ]
+    footer = Table([[footer_left, footer_right]], colWidths=[74 * mm, 50 * mm])
+    footer.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    story = [
+        header,
+        HRFlowable(width="100%", thickness=0.8, color=colors.black,
+                   spaceBefore=6, spaceAfter=6),
+        Paragraph("ส่งถึง:", label_st),
+        Spacer(1, 2),
+        sendto,
+        Spacer(1, 10),
+        items,
+        Spacer(1, 14),
+        footer,
+    ]
+    doc_tpl.build(story)
+    return buf.getvalue()
+
+
+def generate_invoice_pdf(shop, customer, doc, lines, total) -> bytes:
+    return generate_billing_pdf("invoice", shop, customer, doc, lines, total)
+
+
+def generate_receipt_pdf(shop, customer, doc, lines, total) -> bytes:
+    return generate_billing_pdf("receipt", shop, customer, doc, lines, total)
+
+
+def render_billing_html(
+    kind: str,
+    shop: dict,
+    customer: dict,
+    doc: dict,
+    lines: list[dict],
+    total: float,
+) -> str:
+    """HTML A5 สำหรับ auto-pop print dialog (ความสะดวกหน้าจอ; PDF คือ artifact ตัวจริง).
+    อ่านค่าจาก _billing_table_data ชุดเดียวกับ PDF → ค่าตรงกันเสมอ."""
+    bank = shop.get("bank") or {}
+    title = DOC_TITLES.get(kind, "")
+    num_label = NUMBER_LABELS.get(kind, "เลขที่")
+
+    body_rows = []
+    for i, ln in enumerate(lines, 1):
+        body_rows.append(
+            "<tr>"
+            f"<td class='c'>{i}</td>"
+            f"<td class='l'>{escape(str(ln.get('date_str', '')))}</td>"
+            f"<td class='r'>{escape(fmt_baht(ln.get('amount', 0)))}</td>"
+            "</tr>"
+        )
+    body_rows.append(
+        "<tr class='total'>"
+        "<td class='c'></td>"
+        "<td class='r'>รวมทั้งสิ้น</td>"
+        f"<td class='r'>{escape(fmt_baht(total))}</td>"
+        "</tr>"
+    )
+    rows_html = "".join(body_rows)
+
+    meta_rows = (
+        f"<tr><td>{num_label}</td><td class='r'>{escape(str(doc.get('number', '') or ''))}</td></tr>"
+        f"<tr><td>วันที่</td><td class='r'>{escape(str(doc.get('date', '') or ''))}</td></tr>"
+    )
+    if kind == "receipt":
+        meta_rows += (
+            f"<tr><td>อ้างถึงใบแจ้งหนี้</td>"
+            f"<td class='r'>{escape(str(doc.get('invoice_ref', '') or ''))}</td></tr>"
+        )
+
+    if kind == "invoice":
+        footer_left = (
+            "<div>หมายเหตุ: กรุณาชำระเงินโดยโอนเข้าบัญชี</div>"
+            f"<div>ชื่อบัญชี {escape(str(bank.get('account_name', '') or ''))}</div>"
+            f"<div>{escape(str(bank.get('bank_name', '') or ''))}</div>"
+            f"<div>เลขที่บัญชี {escape(str(bank.get('account_no', '') or ''))}</div>"
+        )
+        sig_caption = escape(str(shop.get("name", "") or SHOP_NAME))
+    else:
+        method = str(doc.get("payment_method", "") or "")
+        def _chk(m: str) -> str:
+            mark = "X" if method == m else "&nbsp;"
+            return f"<div>[{mark}] {escape(m)}</div>"
+        footer_left = "<div>รับชำระเงิน</div>" + _chk("เงินสด") + _chk("โอนเข้าบัญชีธนาคาร")
+        sig_caption = "ผู้รับเงิน"
+
+    return f"""<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>{escape(title + ' ' + str(doc.get('number', '') or ''))}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Charmonman:wght@700&family=Sarabun:wght@400;700&display=swap');
+  @page {{ size: A5; margin: 12mm; }}
+  body {{ font-family: 'Sarabun', 'Noto Sans Thai', sans-serif; color: #000; margin: 0; padding: 8px; font-size: 13px; }}
+  .head {{ display: flex; justify-content: space-between; align-items: flex-start; }}
+  .shop {{ font-family: 'Charmonman', cursive; font-size: 30px; font-weight: 700; }}
+  .addr {{ font-size: 11px; }}
+  .title {{ font-size: 24px; font-weight: 700; text-align: right; }}
+  hr {{ border: none; border-top: 1px solid #000; margin: 6px 0; }}
+  .sendto {{ display: flex; justify-content: space-between; }}
+  .meta td {{ padding: 1px 4px; }}
+  .meta td.r {{ font-weight: 700; }}
+  table.items {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
+  table.items th, table.items td {{ border: 1px solid #000; padding: 5px 6px; }}
+  table.items th {{ background: #cccccc; }}
+  td.c {{ text-align: center; }} td.r {{ text-align: right; }} td.l {{ text-align: left; }}
+  tr.total td {{ background: #cccccc; font-weight: 700; }}
+  .footer {{ display: flex; justify-content: space-between; margin-top: 16px; }}
+  .sig {{ text-align: center; }}
+  .sig .line {{ margin-top: 28px; }}
+  @media print {{
+    body {{ min-height: calc(210mm - 24mm); display: flex; flex-direction: column; }}
+    .footer {{ margin-top: auto; }}
+  }}
+</style>
+</head>
+<body onload="window.print()">
+  <div class="head">
+    <div>
+      <div class="shop">{escape(str(shop.get('name', '') or SHOP_NAME))}</div>
+      <div class="addr">{escape(str(shop.get('address', '') or ''))}</div>
+      <div class="addr">เลขที่ผู้เสียภาษี : {escape(str(shop.get('tax_id', '') or ''))}</div>
+    </div>
+    <div class="title">{title}</div>
+  </div>
+  <hr>
+  <div><b>ส่งถึง:</b></div>
+  <div class="sendto">
+    <div>
+      <div>ชื่อบริษัท: {escape(str(customer.get('company_name', '') or ''))}</div>
+      <div>ที่อยู่: {escape(str(customer.get('billing_address', '') or ''))}</div>
+      <div>เลขประจำตัวผู้เสียภาษี : {escape(str(customer.get('tax_id', '') or ''))}</div>
+      <div>สาขา : {escape(str(customer.get('branch', '') or ''))}</div>
+    </div>
+    <table class="meta">{meta_rows}</table>
+  </div>
+  <table class="items">
+    <thead><tr><th>ลำดับที่</th><th>รายละเอียด</th><th>จำนวนเงิน</th></tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+  <div class="footer">
+    <div>{footer_left}</div>
+    <div class="sig">{sig_caption}<div class="line">____________________</div>{escape(str(shop.get('signatory', '') or ''))}</div>
+  </div>
 </body>
 </html>"""
