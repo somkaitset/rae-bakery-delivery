@@ -40,7 +40,7 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
 def init_db(conn: sqlite3.Connection) -> None:
     """Create all base tables + the bill_lines VIEW if absent (idempotent)."""
     global _init_logged
-    for tab_key in schema.BASE_TABS:
+    for tab_key in schema.BASE_TABS + schema.APP_TABS:
         conn.execute(schema.create_table_sql(tab_key))
     conn.execute(schema.CREATE_BILL_LINES_VIEW)
     conn.commit()

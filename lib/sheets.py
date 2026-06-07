@@ -134,3 +134,11 @@ def stocks() -> list[dict]:
 
 def wholesale_prices() -> list[dict]:
     return all_records("wholesale")
+
+
+def invoices() -> list[dict]:
+    return all_records("invoice")
+
+
+def receipts() -> list[dict]:
+    return all_records("receipt")

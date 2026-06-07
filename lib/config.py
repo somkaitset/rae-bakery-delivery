@@ -48,6 +48,14 @@ DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "data" / "app.db")))
 # e.g. BILLS_PDF_DIR=/mnt/data/rae-bakery/bills_pdf
 BILLS_PDF_DIR = Path(os.getenv("BILLS_PDF_DIR", str(BASE_DIR / "data" / "bills_pdf")))
 
+# --- Billing documents (ใบวางบิล) ---
+# Static shop + per-customer billing data for invoices/receipts (tax ids, bank
+# account, signatory, customer company name/branch). Git-ignored like auth_config
+# because it holds tax ids / bank numbers / personal names — see lib/billing_config.py.
+BILLING_CONFIG_PATH = os.getenv(
+    "BILLING_CONFIG_PATH", str(BASE_DIR / "billing_config.yaml")
+)
+
 # --- Auth ---
 AUTH_CONFIG_PATH = os.getenv("AUTH_CONFIG_PATH", str(BASE_DIR / "auth_config.yaml"))
 COOKIE_NAME = os.getenv("COOKIE_NAME", "rae_bakery_auth")
@@ -64,4 +72,6 @@ TABS: dict[str, str] = {
     "bill_item": "รายการสินค้า",
     "bill_lines": "BillLines",
     "stock": "สต็อกคงเหลือ",
+    "invoice": "ใบแจ้งหนี้",
+    "receipt": "ใบเสร็จรับเงิน",
 }
