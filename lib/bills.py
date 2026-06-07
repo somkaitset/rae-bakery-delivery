@@ -164,6 +164,68 @@ def lines_for_bill(bill_id: str, bill_lines_rows: list[dict] | None = None) -> l
     return [r for r in rows if str(r.get("bill_id", "")) == bill_id]
 
 
+def summarize_products_by_code(
+    bill_items: list[dict],
+    allowed_bill_ids: set[str],
+    products: list[dict],
+) -> list[dict]:
+    """Aggregate bill_item rows by product_code, restricted to bills in
+    allowed_bill_ids (all statuses — the caller decides the bill set), then
+    left-join to the full product list so zero-sales products appear as 0/0.
+
+    Unlike bill_total, this does NOT filter qty>0; an all-statuses summary
+    counts every line, so a qty=0/amount!=0 line still contributes its amount.
+    (Follows bill_qty_total semantics, not bill_total. See ARCHITECT REQUIRED-3.)
+
+    Orphan product_codes — present in bill_items but absent from products
+    (e.g. a deleted product with historical sales) — are kept with
+    name == product_code so their amounts are not silently dropped.
+
+    Returns rows sorted by amount_total descending, tiebreak product_code
+    ascending. Each row:
+        {"product_code", "name", "price_group", "qty_total", "amount_total"}
+    qty_total is int, amount_total is float.
+    """
+    totals: dict[str, dict] = {}
+    for it in bill_items:
+        if str(it.get("bill_id", "")) not in allowed_bill_ids:
+            continue
+        code = str(it.get("product_code", ""))
+        acc = totals.setdefault(code, {"qty_total": 0.0, "amount_total": 0.0})
+        acc["qty_total"] += _to_float(it.get("qty", 0))
+        acc["amount_total"] += _to_float(it.get("amount", 0))
+
+    rows: list[dict] = []
+    seen: set[str] = set()
+    # Products are the row spine → zero-sales products appear as 0/0.
+    for p in products:
+        code = str(p.get("code", ""))
+        seen.add(code)
+        acc = totals.get(code, {"qty_total": 0.0, "amount_total": 0.0})
+        rows.append({
+            "product_code": code,
+            "name": str(p.get("name", "")),
+            "price_group": str(p.get("price_group", "")),
+            "qty_total": int(acc["qty_total"]),
+            "amount_total": float(acc["amount_total"]),
+        })
+
+    # Orphan codes (sales without a matching product master row).
+    for code, acc in totals.items():
+        if code in seen:
+            continue
+        rows.append({
+            "product_code": code,
+            "name": code,
+            "price_group": "",
+            "qty_total": int(acc["qty_total"]),
+            "amount_total": float(acc["amount_total"]),
+        })
+
+    rows.sort(key=lambda r: (-r["amount_total"], r["product_code"]))
+    return rows
+
+
 # --- Mutations ---
 
 def create_bill(
