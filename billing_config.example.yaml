@@ -1,0 +1,25 @@
+# Billing documents (ใบวางบิล) — static data for invoices/receipts.
+#
+# Copy this file to billing_config.yaml and fill in the real values.
+# billing_config.yaml is git-ignored because it holds tax ids, a bank account
+# number and personal names. Loaded by lib/billing_config.py.
+# Override the path with the BILLING_CONFIG_PATH env var if needed.
+
+shop:
+  name: "เรเบเกอรี่"
+  address: "<ที่อยู่ร้าน>"
+  tax_id: "<เลขประจำตัวผู้เสียภาษีของร้าน>"
+  signatory: "<ชื่อผู้ลงนาม>"          # printed under the signature line
+  bank:
+    account_name: "<ชื่อบัญชี>"
+    bank_name: "<ธนาคาร>"
+    account_no: "<เลขที่บัญชี>"
+
+# Per-customer billing details, keyed by the customer code (see the ลูกค้า page).
+# Only customers listed here can have a billing document issued.
+customers:
+  C006:                                 # ศว.
+    company_name: "<ชื่อบริษัท (ตามที่ออกใบกำกับ)>"
+    tax_id: "<เลขประจำตัวผู้เสียภาษีของลูกค้า>"
+    branch: "สำนักงานใหญ่"
+    billing_address: "<ที่อยู่สำหรับวางบิล>"

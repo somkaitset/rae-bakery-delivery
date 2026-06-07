@@ -5,6 +5,7 @@ secrets/*
 .env
 .streamlit/secrets.toml
 auth_config.yaml
+billing_config.yaml
 
 # --- Python ---
 __pycache__/
