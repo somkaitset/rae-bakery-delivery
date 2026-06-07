@@ -5,6 +5,7 @@ secrets/*
 .env
 .streamlit/secrets.toml
 auth_config.yaml
+billing_config.yaml
 
 # --- Python ---
 __pycache__/
@@ -58,3 +59,8 @@ data/
 # Self-signed TLS certs for LAN HTTPS (camera/getUserMedia needs secure context)
 certs/
 *.pem
+
+# --- Reference artefacts (real business data / large binaries — keep local, don't commit) ---
+# ต้นฉบับบิล/ข้อมูลขายจริง ใช้เทียบ layout เท่านั้น (ดู memory bill-print-template-source)
+ส่งโรงเรียน2022.xlsx
+bill_example.jpg

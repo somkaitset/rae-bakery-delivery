@@ -1,5 +1,5 @@
 """
-โหลด config จาก environment variables (.env)
+Load config from environment variables (.env).
 """
 from __future__ import annotations
 
@@ -27,24 +27,34 @@ TIMEZONE = os.getenv("TIMEZONE", "Asia/Bangkok")
 APP_TITLE = os.getenv("APP_TITLE", "เรเบเกอรี่ — ระบบส่งสินค้า")
 
 # --- Local image storage ---
-# โฟลเดอร์เก็บรูป (แทน Google Drive — ดู lib/storage.py)
-# บน Proxmox ให้ตั้ง env IMAGES_DIR ชี้ไป volume ถาวรที่ Proxmox backup ครอบไว้
-# เช่น IMAGES_DIR=/mnt/data/rae-bakery/images
+# Image folder (replaces Google Drive — see lib/storage.py).
+# On Proxmox, set the IMAGES_DIR env to a persistent volume covered by backups,
+# e.g. IMAGES_DIR=/mnt/data/rae-bakery/images
 IMAGES_DIR = Path(os.getenv("IMAGES_DIR", str(BASE_DIR / "data" / "images")))
-# ย่อรูปก่อนเก็บ: ด้านยาวสุดไม่เกิน N px + คุณภาพ JPEG (ลดขนาดไฟล์จากมือถือ 3-5MB → ~100-300KB)
+# Downscale before storing: longest side <= N px + JPEG quality (shrinks 3-5MB
+# phone photos to ~100-300KB).
 IMAGE_MAX_SIDE = int(os.getenv("IMAGE_MAX_SIDE", "1600"))
 IMAGE_JPEG_QUALITY = int(os.getenv("IMAGE_JPEG_QUALITY", "85"))
 
-# --- SQLite database (Phase 1: แทน Google Sheets) ---
-# ไฟล์ฐานข้อมูล SQLite — ดู lib/db.py, lib/schema.py
-# บน Proxmox ให้ตั้ง env DB_PATH ชี้ไป local volume ที่ backup ครอบไว้
-# เช่น DB_PATH=/mnt/data/rae-bakery/app.db (WAL ต้องการ local fs — ห้าม NFS/CIFS)
+# --- SQLite database (Phase 1: replaces Google Sheets) ---
+# SQLite database file — see lib/db.py, lib/schema.py.
+# On Proxmox, set the DB_PATH env to a local volume covered by backups,
+# e.g. DB_PATH=/mnt/data/rae-bakery/app.db (WAL needs a local fs — no NFS/CIFS).
 DB_PATH = Path(os.getenv("DB_PATH", str(BASE_DIR / "data" / "app.db")))
 
-# --- Data cache ---
-# อายุ cache ข้อมูลที่อ่านจาก Google Sheets (วินาที) — ลดการยิง API ทุก rerun
-# จะถูกเคลียร์ทันทีเมื่อมีการเขียน (เพิ่ม/แก้/ลบ) อยู่แล้ว
-SHEETS_CACHE_TTL = int(os.getenv("SHEETS_CACHE_TTL", "60"))
+# --- PDF archive storage ---
+# Folder for printed bill PDFs (one file per bill: {bill_id}.pdf — see lib/pdf_archive.py).
+# On Proxmox, set the BILLS_PDF_DIR env to a persistent volume covered by backups,
+# e.g. BILLS_PDF_DIR=/mnt/data/rae-bakery/bills_pdf
+BILLS_PDF_DIR = Path(os.getenv("BILLS_PDF_DIR", str(BASE_DIR / "data" / "bills_pdf")))
+
+# --- Billing documents (ใบวางบิล) ---
+# Static shop + per-customer billing data for invoices/receipts (tax ids, bank
+# account, signatory, customer company name/branch). Git-ignored like auth_config
+# because it holds tax ids / bank numbers / personal names — see lib/billing_config.py.
+BILLING_CONFIG_PATH = os.getenv(
+    "BILLING_CONFIG_PATH", str(BASE_DIR / "billing_config.yaml")
+)
 
 # --- Auth ---
 AUTH_CONFIG_PATH = os.getenv("AUTH_CONFIG_PATH", str(BASE_DIR / "auth_config.yaml"))
@@ -62,4 +72,6 @@ TABS: dict[str, str] = {
     "bill_item": "รายการสินค้า",
     "bill_lines": "BillLines",
     "stock": "สต็อกคงเหลือ",
+    "invoice": "ใบแจ้งหนี้",
+    "receipt": "ใบเสร็จรับเงิน",
 }

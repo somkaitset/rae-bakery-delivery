@@ -40,7 +40,7 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
 def init_db(conn: sqlite3.Connection) -> None:
     """Create all base tables + the bill_lines VIEW if absent (idempotent)."""
     global _init_logged
-    for tab_key in schema.BASE_TABS:
+    for tab_key in schema.BASE_TABS + schema.APP_TABS:
         conn.execute(schema.create_table_sql(tab_key))
     conn.execute(schema.CREATE_BILL_LINES_VIEW)
     conn.commit()
@@ -135,6 +135,39 @@ def append_many(conn: sqlite3.Connection, tab_key: str, rows: list[list[Any]]) -
         [_fit_row(tab_key, r) for r in rows],
     )
     conn.commit()
+
+
+def replace_bill_items(conn: sqlite3.Connection, rows: list[list[Any]], bill_id: str) -> None:
+    """Atomic replace of one bill's item rows: DELETE all bill_item rows for
+    bill_id, then INSERT `rows`, in a SINGLE transaction (one commit).
+
+    A single connection means an interrupted call rolls back the DELETE+INSERT
+    together — no partial/zero-item window. `rows` may be empty (clears the
+    bill's items). Column order follows schema.COLUMNS["bill_item"].
+    """
+    conn.execute('DELETE FROM "bill_item" WHERE "bill_id"=?', [bill_id])
+    if rows:
+        cols = ", ".join(f'"{eng}"' for eng in schema.english_columns("bill_item"))
+        qs = ", ".join("?" for _ in schema.COLUMNS["bill_item"])
+        conn.executemany(
+            f'INSERT INTO "bill_item" ({cols}) VALUES ({qs})',
+            [_fit_row("bill_item", r) for r in rows],
+        )
+    conn.commit()
+
+
+def delete_bill(conn: sqlite3.Connection, bill_id: str) -> int:
+    """Atomic delete of a bill and all its item rows in a SINGLE transaction.
+
+    DELETE the bill_item rows WHERE bill_id, then the bill row WHERE bill_id,
+    in one commit. Keyed by bill_id (not row_number), so it never depends on row
+    ordering. Returns the total rows deleted (items + the bill row; 0 if no such
+    bill).
+    """
+    n = conn.execute('DELETE FROM "bill_item" WHERE "bill_id"=?', [bill_id]).rowcount
+    n += conn.execute('DELETE FROM "bill" WHERE "bill_id"=?', [bill_id]).rowcount
+    conn.commit()
+    return n
 
 
 def update_row(conn: sqlite3.Connection, tab_key: str, row_number: int, row: list[Any]) -> None:

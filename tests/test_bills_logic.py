@@ -146,6 +146,132 @@ def test_to_float_tolerance():
     assert bills._to_float("abc") == 0.0
 
 
+# --- summarize_products_by_code --------------------------------------------
+
+def _seed_products(rows):
+    """rows: list of (code, name, price_group). Other product cols defaulted."""
+    for code, name, group in rows:
+        sheets.append("product", [code, name, group, "", "1", True])
+
+
+def test_summarize_aggregates_qty_and_amount(fresh_db):
+    fresh_db()
+    _seed_products([("P101", "A", "10"), ("P102", "B", "12")])
+    # Two bills with overlapping products; P101 spans both.
+    sheets.append_many("bill_item", [
+        ["I0001", "D0001", "P101", "3", "10", "10", "30"],
+        ["I0002", "D0001", "P102", "2", "12", "12", "24"],
+        ["I0003", "D0002", "P101", "5", "10", "10", "50"],
+    ])
+    rows = bills.summarize_products_by_code(
+        sheets.bill_items(), {"D0001", "D0002"}, sheets.products()
+    )
+    by_code = {r["product_code"]: r for r in rows}
+    assert by_code["P101"]["qty_total"] == 8       # 3 + 5
+    assert by_code["P101"]["amount_total"] == 80.0  # 30 + 50
+    assert by_code["P102"]["qty_total"] == 2
+    assert by_code["P102"]["amount_total"] == 24.0
+    # name + price_group resolved from the product master.
+    assert by_code["P101"]["name"] == "A"
+    assert by_code["P101"]["price_group"] == "10"
+
+
+def test_summarize_includes_zero_sales_products(fresh_db):
+    fresh_db()
+    _seed_products([("P101", "Sold", "10"), ("P102", "NeverSold", "12")])
+    sheets.append("bill_item", ["I0001", "D0001", "P101", "3", "10", "10", "30"])
+    rows = bills.summarize_products_by_code(
+        sheets.bill_items(), {"D0001"}, sheets.products()
+    )
+    by_code = {r["product_code"]: r for r in rows}
+    # The unsold product still appears, as 0 / 0.0.
+    assert by_code["P102"]["qty_total"] == 0
+    assert by_code["P102"]["amount_total"] == 0.0
+
+
+def test_summarize_restricts_to_allowed_bill_ids(fresh_db):
+    fresh_db()
+    _seed_products([("P101", "A", "10")])
+    sheets.append_many("bill_item", [
+        ["I0001", "D0001", "P101", "3", "10", "10", "30"],
+        ["I0002", "D0002", "P101", "99", "10", "10", "990"],  # excluded bill
+    ])
+    rows = bills.summarize_products_by_code(
+        sheets.bill_items(), {"D0001"}, sheets.products()
+    )
+    by_code = {r["product_code"]: r for r in rows}
+    # D0002 is outside the allowed set: its item must not contribute.
+    assert by_code["P101"]["qty_total"] == 3
+    assert by_code["P101"]["amount_total"] == 30.0
+
+
+def test_summarize_sorted_by_amount_desc(fresh_db):
+    fresh_db()
+    # P103/P104 carry EQUAL amount_total to exercise the product_code tiebreak.
+    _seed_products([
+        ("P101", "Top", "10"),
+        ("P102", "Zero", "12"),
+        ("P103", "EqA", "10"),
+        ("P104", "EqB", "10"),
+    ])
+    sheets.append_many("bill_item", [
+        ["I0001", "D0001", "P101", "10", "10", "10", "100"],
+        ["I0002", "D0001", "P103", "5", "10", "10", "50"],
+        ["I0003", "D0001", "P104", "5", "10", "10", "50"],
+        # P102 has no sales -> 0.0, must fall last.
+    ])
+    rows = bills.summarize_products_by_code(
+        sheets.bill_items(), {"D0001"}, sheets.products()
+    )
+    order = [r["product_code"] for r in rows]
+    # Amount-desc: 100 first; the two 50s next (tiebreak code ASC); 0 last.
+    assert order == ["P101", "P103", "P104", "P102"]
+    # Equal amounts ordered by product_code ascending.
+    assert rows[1]["amount_total"] == rows[2]["amount_total"] == 50.0
+    # Zero-sales row is last.
+    assert rows[-1]["product_code"] == "P102"
+    assert rows[-1]["amount_total"] == 0.0
+
+
+def test_summarize_orphan_product_code_kept(fresh_db):
+    fresh_db()
+    _seed_products([("P101", "Live", "10")])
+    # P999 has historical sales but no matching product master row.
+    sheets.append_many("bill_item", [
+        ["I0001", "D0001", "P101", "3", "10", "10", "30"],
+        ["I0002", "D0001", "P999", "2", "10", "10", "20"],
+    ])
+    rows = bills.summarize_products_by_code(
+        sheets.bill_items(), {"D0001"}, sheets.products()
+    )
+    by_code = {r["product_code"]: r for r in rows}
+    assert "P999" in by_code
+    # Orphan keeps its sales, with name falling back to the code.
+    assert by_code["P999"]["name"] == "P999"
+    assert by_code["P999"]["qty_total"] == 2
+    assert by_code["P999"]["amount_total"] == 20.0
+
+
+def test_summarize_counts_qty_zero_nonzero_amount(fresh_db):
+    fresh_db()
+    _seed_products([("P101", "A", "10")])
+    # A qty=0 line carrying a nonzero amount (mirror of
+    # test_bill_total_filters_qty_but_qty_total_does_not). The summary does NOT
+    # filter qty>0, so the amount is INCLUDED — deliberate asymmetry vs
+    # bill_total (ARCHITECT REQUIRED-3).
+    sheets.append_many("bill_item", [
+        ["I0001", "D0001", "P101", "3", "10", "10", "30"],
+        ["I0002", "D0001", "P101", "0", "10", "10", "99"],
+    ])
+    rows = bills.summarize_products_by_code(
+        sheets.bill_items(), {"D0001"}, sheets.products()
+    )
+    by_code = {r["product_code"]: r for r in rows}
+    # qty_total: 3 + 0; amount_total: 30 + 99 (the qty=0 amount is kept).
+    assert by_code["P101"]["qty_total"] == 3
+    assert by_code["P101"]["amount_total"] == 129.0
+
+
 # --- parse_date / fmt_date round-trip --------------------------------------
 
 def test_parse_fmt_date_round_trip():

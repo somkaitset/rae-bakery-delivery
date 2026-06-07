@@ -74,6 +74,29 @@ COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("image", "รูปจาก LINE"),
         ("note", "หมายเหตุ"),
     ],
+    # --- App-only tables (NOT migrated from the retired Sheet — see APP_TABS) ---
+    # Billing documents (ใบวางบิล) aggregating a customer's delivery bills over a
+    # date range into per-day totals. Amounts are recomputed from `bill` at render
+    # time, so these tables store only the document record (number/customer/period).
+    "invoice": [
+        ("invoice_no", "เลขที่ใบแจ้งหนี้"),
+        ("issue_date", "วันที่"),
+        ("customer_code", "รหัสลูกค้า"),
+        ("period_start", "ตั้งแต่วันที่"),
+        ("period_end", "ถึงวันที่"),
+        ("status", "สถานะ"),
+        ("note", "หมายเหตุ"),
+    ],
+    "receipt": [
+        ("receipt_no", "เลขที่ใบเสร็จ"),
+        ("invoice_no", "อ้างถึงใบแจ้งหนี้"),
+        ("issue_date", "วันที่"),
+        ("customer_code", "รหัสลูกค้า"),
+        ("period_start", "ตั้งแต่วันที่"),
+        ("period_end", "ถึงวันที่"),
+        ("payment_method", "วิธีชำระเงิน"),
+        ("note", "หมายเหตุ"),
+    ],
 }
 
 # bill_lines is a derived VIEW (NOT a base table). english -> thai for its reads.
@@ -108,6 +131,13 @@ BASE_TABS: list[str] = [
     "bill",
     "bill_item",
     "stock",
+]
+
+# App-only tables created by init_db but NEVER migrated from the Sheet (they have
+# no Sheet source). Kept out of BASE_TABS so the migration script ignores them.
+APP_TABS: list[str] = [
+    "invoice",
+    "receipt",
 ]
 
 

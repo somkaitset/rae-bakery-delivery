@@ -118,6 +118,25 @@ def unit_price(price_set: str, price_group: str, prices: dict[str, float] | None
     return prices.get(f"{price_set}-{price_group}", 0.0)
 
 
+# --- Product grid ordering ---
+
+def price_group_sort_key(p: dict) -> tuple[int, str]:
+    """Sort products by price-group ascending (numeric prefix of the label,
+    e.g. '15' or '15 บาท' -> 15), then product code A->Z.
+
+    Unparseable groups sink to the bottom deterministically (large sentinel).
+    """
+    group = str(p.get("price_group", "")).strip()
+    digits = ""
+    for ch in group:
+        if ch.isdigit():
+            digits += ch
+        else:
+            break
+    num = int(digits) if digits else 10 ** 6
+    return (num, str(p.get("code", "")))
+
+
 # --- Bill totals / queries ---
 
 def bill_total(bill_id: str, items: list[dict] | None = None) -> float:
@@ -143,6 +162,68 @@ def lines_for_bill(bill_id: str, bill_lines_rows: list[dict] | None = None) -> l
     """คืน BillLines (สรุปตามกลุ่มราคา) สำหรับใบนี้"""
     rows = bill_lines_rows if bill_lines_rows is not None else sheets.bill_lines()
     return [r for r in rows if str(r.get("bill_id", "")) == bill_id]
+
+
+def summarize_products_by_code(
+    bill_items: list[dict],
+    allowed_bill_ids: set[str],
+    products: list[dict],
+) -> list[dict]:
+    """Aggregate bill_item rows by product_code, restricted to bills in
+    allowed_bill_ids (all statuses — the caller decides the bill set), then
+    left-join to the full product list so zero-sales products appear as 0/0.
+
+    Unlike bill_total, this does NOT filter qty>0; an all-statuses summary
+    counts every line, so a qty=0/amount!=0 line still contributes its amount.
+    (Follows bill_qty_total semantics, not bill_total. See ARCHITECT REQUIRED-3.)
+
+    Orphan product_codes — present in bill_items but absent from products
+    (e.g. a deleted product with historical sales) — are kept with
+    name == product_code so their amounts are not silently dropped.
+
+    Returns rows sorted by amount_total descending, tiebreak product_code
+    ascending. Each row:
+        {"product_code", "name", "price_group", "qty_total", "amount_total"}
+    qty_total is int, amount_total is float.
+    """
+    totals: dict[str, dict] = {}
+    for it in bill_items:
+        if str(it.get("bill_id", "")) not in allowed_bill_ids:
+            continue
+        code = str(it.get("product_code", ""))
+        acc = totals.setdefault(code, {"qty_total": 0.0, "amount_total": 0.0})
+        acc["qty_total"] += _to_float(it.get("qty", 0))
+        acc["amount_total"] += _to_float(it.get("amount", 0))
+
+    rows: list[dict] = []
+    seen: set[str] = set()
+    # Products are the row spine → zero-sales products appear as 0/0.
+    for p in products:
+        code = str(p.get("code", ""))
+        seen.add(code)
+        acc = totals.get(code, {"qty_total": 0.0, "amount_total": 0.0})
+        rows.append({
+            "product_code": code,
+            "name": str(p.get("name", "")),
+            "price_group": str(p.get("price_group", "")),
+            "qty_total": int(acc["qty_total"]),
+            "amount_total": float(acc["amount_total"]),
+        })
+
+    # Orphan codes (sales without a matching product master row).
+    for code, acc in totals.items():
+        if code in seen:
+            continue
+        rows.append({
+            "product_code": code,
+            "name": code,
+            "price_group": "",
+            "qty_total": int(acc["qty_total"]),
+            "amount_total": float(acc["amount_total"]),
+        })
+
+    rows.sort(key=lambda r: (-r["amount_total"], r["product_code"]))
+    return rows
 
 
 # --- Mutations ---
@@ -205,32 +286,112 @@ def create_bill(
     return bill_id
 
 
+def update_bill(
+    bill_id: str,
+    customer_code: str,
+    bill_date: date,
+    items_qty: dict[str, int],  # { product_code: qty }
+    note: str = "",
+) -> None:
+    """
+    แก้บิลที่เป็น 'ร่าง': อัปเดตแถวบิล (วันที่/ลูกค้า/หมายเหตุ) + แทนที่รายการสินค้า
+    ทั้งหมดใน 1 transaction. คำนวณ price_group/unit_price/amount ใหม่เหมือน create_bill.
+    bill_id ไม่เปลี่ยน. ปฏิเสธ (raise) ถ้าสถานะปัจจุบันไม่ใช่ 'ร่าง'.
+    """
+    # โหลด snapshot ก่อนแก้ครั้งเดียว (ห้ามอ่านซ้ำหลัง delete)
+    existing_bills = sheets.bills()
+    existing_items = sheets.bill_items()
+    customers = {c.get("code"): c for c in sheets.customers()}
+    products = {p.get("code"): p for p in sheets.products()}
+    prices = price_map()
+
+    bill = next(
+        (b for b in existing_bills if str(b.get("bill_id", "")) == bill_id), None
+    )
+    if bill is None:
+        raise ValueError(f"bill not found: {bill_id}")
+    status = str(bill.get("status", ""))
+    if status != "ร่าง":
+        raise ValueError("cannot edit a non-draft bill")
+
+    price_set = customers.get(customer_code, {}).get("price_set", "มาตรฐาน")
+
+    # อัปเดตแถวบิลในที่ — รักษาสถานะเดิม เปลี่ยนเฉพาะวันที่/ลูกค้า/หมายเหตุ
+    row_number = sheets.find_row_by_key("bill", bill_id, key_col=1)
+    sheets.update_row("bill", row_number, [
+        bill_id,
+        fmt_date(bill_date),
+        customer_code,
+        note,
+        status,
+    ])
+
+    # pin item-id sequence จาก snapshot ก่อนแก้ (M3: กัน id ชนกัน)
+    next_seq = next_item_seq(existing_items)
+    new_item_rows = []
+    for product_code, qty in items_qty.items():
+        if qty <= 0:
+            continue
+        prod = products.get(product_code, {})
+        price_group = str(prod.get("price_group", ""))
+        unit = unit_price(price_set, price_group, prices)
+        amount = qty * unit
+        new_item_rows.append([
+            f"I{next_seq:04d}",
+            bill_id,
+            product_code,
+            qty,
+            price_group,
+            unit,
+            amount,
+        ])
+        next_seq += 1
+
+    # แทนที่รายการทั้งหมดของบิลนี้ใน 1 transaction (เคลียร์ cache ใน wrapper ด้วย)
+    sheets.replace_bill_items(new_item_rows, bill_id)
+
+
+# --- Status setters ---
+
+def set_status(bill_id: str, status: str) -> None:
+    """เปลี่ยนสถานะบิล — โหลดแถวปัจจุบันมาทั้งแถว เปลี่ยนเฉพาะ status แล้วเขียนกลับ.
+
+    สำคัญ (M4): ต้องประกอบแถวใหม่จาก dict ที่โหลดมา ห้ามส่ง list สั้น ๆ —
+    _fit_row จะ pad ด้วย "" ทำให้ note/วันที่/ลูกค้าหายเงียบ ๆ.
+    """
+    bills_data = sheets.bills()
+    bill = next(
+        (b for b in bills_data if str(b.get("bill_id", "")) == bill_id), None
+    )
+    if bill is None:
+        raise ValueError(f"bill not found: {bill_id}")
+    row_number = sheets.find_row_by_key("bill", bill_id, key_col=1)
+    sheets.update_row("bill", row_number, [
+        bill.get("bill_id", ""),
+        bill.get("date", ""),
+        bill.get("customer_code", ""),
+        bill.get("note", ""),
+        status,
+    ])
+    sheets.clear_caches()
+
+
+def finalize(bill_id: str) -> None:
+    """ร่าง → ส่งแล้ว (idempotent: เรียกซ้ำบนบิลที่ส่งแล้วก็ยังเป็น ส่งแล้ว)."""
+    set_status(bill_id, "ส่งแล้ว")
+
+
+def revert_to_draft(bill_id: str) -> None:
+    """ส่งแล้ว → ร่าง (ปลดล็อกเพื่อแก้)."""
+    set_status(bill_id, "ร่าง")
+
+
 def delete_bill(bill_id: str) -> int:
     """
-    ลบ bill + items ทั้งหมดของ bill_id นี้
-    คืนจำนวนแถวที่ลบ
+    ลบ bill + items ทั้งหมดของ bill_id นี้ (atomic, ใน 1 transaction)
+    คืนจำนวนแถวที่ลบ (items + ตัวบิล)
     """
-    deleted = 0
-
-    # delete items (reverse order to preserve row numbers)
-    items = sheets.bill_items()
-    item_rows = [
-        i + 2  # row 1 = header, +2 because enumerate starts 0
-        for i, it in enumerate(items)
-        if str(it.get("bill_id", "")) == bill_id
-    ]
-    for row_num in sorted(item_rows, reverse=True):
-        sheets.delete_row("bill_item", row_num)
-        deleted += 1
-
-    # delete bill
-    bills_data = sheets.bills()
-    for i, b in enumerate(bills_data):
-        if str(b.get("bill_id", "")) == bill_id:
-            sheets.delete_row("bill", i + 2)
-            deleted += 1
-            break
-
+    deleted = sheets.delete_bill(bill_id)
     sheets.clear_caches()
     return deleted
 

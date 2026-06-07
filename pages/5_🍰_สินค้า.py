@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
 import pandas as pd
 import streamlit as st
 
-from lib import bills, labels, sheets, storage
+from lib import bills, sheets, storage
 from lib.auth import require_auth
 
 require_auth()
@@ -28,6 +28,7 @@ st.title("🍰 สินค้า")
 PRICE_GROUPS = ["10", "12", "15", "20", "25", "30", "35"]
 
 st.session_state.setdefault("prod_edit_code", None)
+st.session_state.setdefault("prod_table_nonce", 0)
 
 
 # --- helpers ---
@@ -105,6 +106,10 @@ def render_gallery() -> None:
 
 
 def render_table() -> None:
+    flash = st.session_state.pop("prod_table_flash", None)
+    if flash:
+        st.success(flash)
+
     try:
         ps = sheets.products()
     except Exception as e:
@@ -113,11 +118,94 @@ def render_table() -> None:
     if not ps:
         st.info("ยังไม่มีสินค้า")
         return
-    df = pd.DataFrame(sorted(ps, key=_sort_key))
-    if "active" in df.columns:
-        df["active"] = df["active"].apply(_normalize_active)
-    df_display = df.rename(columns=labels.thai_columns("product"))
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+    ps_sorted = sorted(ps, key=_sort_key)
+    # One normalized source for BOTH the editor frame and the diff snapshot, so
+    # like-typed comparisons don't false-positive every row as "changed"
+    # (active→bool, display_order→int, price_group→str). image is kept for the
+    # write pass-through but is omitted from the editor.
+    normalized = [
+        {
+            "code": str(p.get("code", "")),
+            "name": str(p.get("name", "") or ""),
+            "price_group": str(p.get("price_group", "")),
+            "display_order": int(bills._to_float(p.get("display_order", 0))),
+            "active": _normalize_active(p.get("active")),
+            "image": str(p.get("image", "") or ""),
+        }
+        for p in ps_sorted
+    ]
+    snapshot = {row["code"]: row for row in normalized}
+
+    df_editable = pd.DataFrame(
+        [{k: r[k] for k in ("code", "name", "price_group", "display_order", "active")}
+         for r in normalized]
+    )
+
+    edited = st.data_editor(
+        df_editable,
+        key=f"prod_table_{st.session_state.prod_table_nonce}",
+        num_rows="fixed",
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "code": st.column_config.TextColumn("รหัสสินค้า", disabled=True),
+            "name": st.column_config.TextColumn("ชื่อสินค้า", required=True),
+            "price_group": st.column_config.SelectboxColumn("กลุ่มราคา", options=PRICE_GROUPS),
+            "display_order": st.column_config.NumberColumn(
+                "ลำดับแสดง", min_value=0, max_value=999, step=1
+            ),
+            "active": st.column_config.CheckboxColumn("ใช้งาน"),
+        },
+    )
+
+    if st.button("💾 บันทึก", type="primary", use_container_width=True):
+        edited_rows = edited.to_dict("records")
+        written = 0
+        empty_name_codes: list[str] = []
+        missing_row_codes: list[str] = []
+        for row in edited_rows:
+            code = str(row.get("code", ""))
+            orig = snapshot.get(code)
+            if orig is None:
+                continue
+            name = str(row.get("name", "") or "").strip()
+            price_group = str(row.get("price_group", ""))
+            display_order = int(bills._to_float(row.get("display_order", 0)))
+            active = bool(row.get("active"))
+            changed = (
+                name != orig["name"].strip()
+                or price_group != orig["price_group"]
+                or display_order != orig["display_order"]
+                or active != orig["active"]
+            )
+            if not changed:
+                continue
+            if not name:
+                empty_name_codes.append(code)
+                continue
+            row_number = sheets.find_row_by_key("product", code)
+            if not row_number:
+                missing_row_codes.append(code)
+                continue
+            bills.update_product(
+                row_number, code, name, price_group,
+                orig["image"], display_order, active,
+            )
+            written += 1
+
+        if written:
+            st.session_state.prod_table_flash = f"บันทึก {written} รายการเรียบร้อย"
+            st.session_state.prod_table_nonce += 1
+        if empty_name_codes:
+            st.error("ชื่อสินค้าห้ามว่าง: " + ", ".join(empty_name_codes))
+        if missing_row_codes:
+            st.error("หาแถวใน Sheet ไม่เจอ ข้าม: " + ", ".join(missing_row_codes))
+        if written:
+            st.rerun()
+        elif not empty_name_codes and not missing_row_codes:
+            st.info("ไม่มีการเปลี่ยนแปลง")
+
     active_n = sum(_normalize_active(p.get("active")) for p in ps)
     st.caption(f"รวม **{len(ps)}** รายการ ({active_n} ใช้งาน)")
 
